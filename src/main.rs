@@ -337,7 +337,7 @@ fn process_components(
         return Ok(());
     }
     
-    // Check if already cluster has the high-quality bin (>90% comp, <5% cont)
+    // Check if the cluster has already a high-quality bin (>90% comp, <5% cont)
     if assess::check_high_quality_bin(&component, &bin_qualities, bindir, resultdir, &format) {
         return Ok(());
     }
