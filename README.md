@@ -1,14 +1,23 @@
 # MAGmax
-MAGmax is a tool to maximize the yield of Metagenome-Assembled Genomes (MAGs) through bin Merging and reAssembly.
+MAGmax is a dereplication tool designed to maximize the recovery of Metagenome-Assembled Genomes (MAGs) through bin Merging and reAssembly. It performs dereplication in three stages: (i) grouping bins based on average sequence identity, (ii) merging bins within each group, and (iii) reassembling the merged bins.
 
-### Example run
+## INPUTS
+MAGmax requires three input directories,
+1. `binsdir`, a directory containing bin files in FASTA format that need to be dereplicated. (e.g., output files from any metagenome binning tool)
 
-    magmax -b binsdir -m mapid_dir -r readdir -f fasta -t 24
-    magmax -b binsdir -m mapid_dir -r readdir -f fasta -t 24 -q quality_report.tsv // if CheckM2 result is already available
-    magmax -b binsdir -m mapid_dir -r readdir -f fasta -t 24 --split // if input bins are not already split by sample id 
+2. `readdir`, a directory containing read files in FASTQ format for each sample. 
+   
+3. `mapid_dir`, a directory containing mapping files for each sample. Each file is a text file listing read IDs and the corresponding contig IDs they mapped to. These files are used to retrieve reads that map to each merged bin from the FASTQ files in `readdir` and to generate new bin-specific FASTQ files for reassembly.
 
-### Test run
-    magmax -b test/bins -m test/mapids -r test/reads -t 24 -q test/quality_report.tsv
+## OUTPUTS
+An output directory named `mags_<x>comp_<y>purity` will be created, where `x` and `y` correspond to the user-specified completeness and purity thresholds used to select final bins. By default, MAGmax uses a percentage of 50 for completeness and 95 for purity.   
+The output directory contains dereplicated bins, and a text file listing the completeness and contamination scores for each bin as calculated by CheckM2.
+
+### Example command line call
+
+    magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24
+    magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 -q quality_report.tsv // if CheckM2 result is already available
+    magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 --split // if input bins are not already split by sample id 
 
 ## Install
 ### Prerequisites
@@ -49,7 +58,7 @@ Option 2: Build from source
     cargo install --path .
     magmax -h
 
-
+    
 ## Options
         -b, --bindir <BINDIR>
                 Directory containing fasta files of bins
@@ -78,19 +87,24 @@ Option 2: Build from source
         -V, --version
                 Print version
 
+### Test run using toy data
+This example test run demonstrates dereplication of bins using the provided toy dataset. In the `test/bins` directory, example bins generated with MetaBAT2 are given. In the `test/reads` directory, paired-end read files for two samples are given and in the `test/mapids` directory, mapid files mapping reads to contigs for each sample are given. Precomputed CheckM2 quality scores for the input bins are given in the `test/quality_report.tsv`. Run the following command to execute the test:
+
+    magmax -b test/bins -r test/reads -m test/mapids -t 24 -q test/quality_report.tsv
+
 
 ## Notes
-1. Input contigs should have id prefixed with the sample ID, separated by 'C'. Perform mapping and binning on contig files with these updated contig ids.
+1. Input contigs should have id prefixed with the sample ID, separated by 'C', as commonly practiced in the single-sample and multi-sample binning. Perform mapping and binning on contig files with these updated contig ids.
 2. Mapid files can be generated using aligner2counts (https://github.com/soedinglab/binning_benchmarking/tree/main/util#aligner2counts) with `only-mapids` option.
 
     File name: `<sampleid>_mapids`
     ```
-    read1_id    sampleidCcontig1_id
-    read2_id    sampleidCcontig2_id
-    read2_id    sampleidCcontig4_id
-    read3_id    sampleidCcontig2_id
-    read4_id    sampleidCcontig3_id
-    read4_id    sampleidCcontig4_id
+    read1_id    <sampleid>Ccontig1_id
+    read2_id    <sampleid>Ccontig2_id
+    read2_id    <sampleid>Ccontig4_id
+    read3_id    <sampleid>Ccontig2_id
+    read4_id    <sampleid>Ccontig3_id
+    read4_id    <sampleid>Ccontig4_id
     ```
 
 3. If input bins are not separated by sample IDs, such as when using MetaBAT2 or COMEBin on a concatenated set of contigs, use the `--split` option to automatically separate input bin by sample IDs.
