@@ -10,7 +10,8 @@ MAGmax requires three input directories,
 3. `mapid_dir`, directory containing mapping files for each sample. Each file is a text file listing read IDs and the corresponding contig IDs they mapped to. These files are used to retrieve reads that map to each merged bin from the FASTQ files in `readdir` and to generate new bin-specific FASTQ files for reassembly.
 
 ## Output
-An output directory named `mags_<x>comp_<y>purity` will be created, where `x` and `y` correspond to the user-specified completeness and purity thresholds used to select final bins. By default, MAGmax uses a percentage of 50 for completeness and 95 for purity.   
+An output directory named `mags_<x>comp_<y>purity` will be created, where `x` and `y` correspond to the user-specified completeness and purity thresholds used to select final bins. By default, MAGmax uses a percentage of 50 for completeness and 95 for purity.
+ 
 The output directory contains dereplicated bins, and a text file listing the completeness and contamination scores for each bin as calculated by CheckM2.
 
 ## Example command line call
