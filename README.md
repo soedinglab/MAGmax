@@ -125,7 +125,7 @@ To fix, use the below bash command
 
     sed -i -E 's/^(@[^.]+\.[^.]+)\./\1 /' read.fastq
 
-3. Mapid files can be created using [`aligner2counts`] (https://github.com/soedinglab/binning_benchmarking/tree/main/util#aligner2counts) with the `only-mapids` option. An example file format is given below,
+3. Mapid files can be created using `aligner2counts` (https://github.com/soedinglab/binning_benchmarking/tree/main/util#aligner2counts) with the `only-mapids` option. An example file format is given below,
 
     File name: `<sampleid>_mapids`
     ```
