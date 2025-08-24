@@ -1,7 +1,7 @@
 # MAGmax
 MAGmax is a dereplication tool designed to maximize the recovery of Metagenome-Assembled Genomes (MAGs) through bin Merging and reAssembly. It performs dereplication in three stages: (i) grouping bins based on average sequence identity, (ii) merging bins within each group, and (iii) reassembling the merged bins.
 
-## INPUTS
+## Inputs
 MAGmax requires three input directories,
 1. `binsdir`, directory containing bin files in FASTA format that need to be dereplicated. (e.g., output files from any metagenome binning tool)
 
@@ -9,17 +9,17 @@ MAGmax requires three input directories,
    
 3. `mapid_dir`, directory containing mapping files for each sample. Each file is a text file listing read IDs and the corresponding contig IDs they mapped to. These files are used to retrieve reads that map to each merged bin from the FASTQ files in `readdir` and to generate new bin-specific FASTQ files for reassembly.
 
-## OUTPUT
+## Output
 An output directory named `mags_<x>comp_<y>purity` will be created, where `x` and `y` correspond to the user-specified completeness and purity thresholds used to select final bins. By default, MAGmax uses a percentage of 50 for completeness and 95 for purity.   
 The output directory contains dereplicated bins, and a text file listing the completeness and contamination scores for each bin as calculated by CheckM2.
 
-### Example command line call
+## Example command line call
 
     magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24
     magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 -q quality_report.tsv // if CheckM2 result is already available
     magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 --split // if input bins are not already split by sample id 
 
-## Install
+## Installation
 ### Prerequisites
 
 - **Rust**: Follow the instructions [here](https://www.rust-lang.org/tools/install) to install Rust.
@@ -87,7 +87,7 @@ Option 2: Build from source
         -V, --version
                 Print version
 
-### Test run using toy data
+## Test run using toy data
 This example test run demonstrates dereplication of bins using the provided toy dataset. In the `test/bins` directory, example bins generated with MetaBAT2 are given. In the `test/reads` directory, paired-end read files for two samples are given and in the `test/mapids` directory, mapid files mapping reads to contigs for each sample are given. Precomputed CheckM2 quality scores for the input bins are given in the `test/quality_report.tsv`. Run the following command to execute the test:
 
     magmax -b test/bins -r test/reads -m test/mapids -t 24 -q test/quality_report.tsv
