@@ -92,7 +92,7 @@ fn main() -> io::Result<()> {
     let qual = cli.qual;
     let parentdir = bindir.parent().map(PathBuf::from).unwrap_or_else(|| bindir.clone());
     
-    info!("Starting MAGma with parameters:");
+    info!("Starting MAGmax with parameters:");
     info!("  🔹 Bins Directory: {:?}", bindir);
     info!("  🔹 ANI Cutoff: {:.1}%", cli.ani);
     info!("  🔹 Completeness Cutoff: {:.1}%", cli.completeness_cutoff);
@@ -296,7 +296,7 @@ fn main() -> io::Result<()> {
     // Final dereplication using skani
     let _ = merge::drep_finalbins(&resultdir, &bin_qualities, ani_cutoff);
        
-    info!("MAGma is successfully completed!");  
+    info!("MAGmax is successfully completed!");  
 
     Ok(())
 }
