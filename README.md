@@ -17,7 +17,16 @@ The output directory contains dereplicated bins, and a text file listing the com
 
     magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24
     magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 -q quality_report.tsv // if CheckM2 result is already available
-    magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 --split // if input bins are not already split by sample id 
+    magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 --split // if input bins are not already split by sample id
+
+
+## Dereplication without reassembly
+MAGmax provides an option to peform dereplication without reassembly using `--no-reassembly` flag. In this mode, MAGmax selects the best bin within each genomic cluster based on a quality score (defined as completeness - 5 * contamination) that also meets the user-defined completeness and contamination thresholds. When this option is enabled, only the bin directory (`-b`) is required as input.
+
+    magmax -b <binsdir> --no-reassembly -t 24 -f fasta
+    magmax -b <binsdir> --no-reassembly -f fasta -t 24 -q quality_report.tsv // if CheckM2 result is already available
+    magmax -b <binsdir> --no-reassembly -f fasta -t 24 --split // if input bins are not already split by sample id
+
 
 ## Install
 ### Prerequisites
@@ -62,40 +71,61 @@ Option 2: Build from source
 ## Options
         -b, --bindir <BINDIR>
                 Directory containing fasta files of bins
+        -r, --readdir <READDIR>
+                Directory containing read files
+        -m, --mapdir <MAPDIR>
+                Directory containing mapids files
         -i, --ani <ANI>
                 ANI for clustering bins (%) [default: 99]
         -c, --completeness <COMPLETENESS_CUTOFF>
                 Minimum completeness of bins (%) [default: 50]
         -p, --purity <PURITY_CUTOFF>
                 Mininum purity (1- contamination) of bins (%) [default: 95]
-        -m, --mapdir <MAPDIR>
-                Directory containing mapids files
-        -r, --readdir <READDIR>
-                Directory containing read files
         -f, --format <FORMAT>
                 Bin file extension [default: fasta]
         -t, --threads <THREADS>
                 Number of threads to use [default: 8]
+            --no-reassembly
+                Perform dereplication without bin merging and reassembly
             --split
                 Split clusters into sample-wise bins before processing
         -q, --qual <QUAL>
                 Quality file produced by CheckM2 (quality_report.tsv)
             --assembler <ASSEMBLER>
-                assembler choice for reassembly step (spades|megahit) [default: spades, recommended]
+                Assembler choice for reassembly step (spades|megahit), spades is recommended [default: spades]
         -h, --help
                 Print help
         -V, --version
                 Print version
 
-### Test run using toy data
+## Test run using toy data
 This example test run demonstrates dereplication of bins using the provided toy dataset. In the `test/bins` directory, example bins generated with MetaBAT2 are given. In the `test/reads` directory, paired-end read files for two samples are given and in the `test/mapids` directory, mapid files mapping reads to contigs for each sample are given. Precomputed CheckM2 quality scores for the input bins are given in the `test/quality_report.tsv`. Run the following command to execute the test:
 
     magmax -b test/bins -r test/reads -m test/mapids -t 24 -q test/quality_report.tsv
 
+To run without reassembly,
 
-## Notes
-1. Input contigs should have id prefixed with the sample ID, separated by 'C', as commonly practiced in the single-sample and multi-sample binning. Perform mapping and binning on contig files with these updated contig ids.
-2. Mapid files can be generated using aligner2counts (https://github.com/soedinglab/binning_benchmarking/tree/main/util#aligner2counts) with `only-mapids` option.
+    magmax -b test/bins --no-reassembly -t 24 -q test/quality_report.tsv // run dereplication without reassembly
+
+After running MAGmax, an output folder named `mags_50comp_95purity` will be created in the `test` directory. This folder contains the following files:
+
+- `bins_checkm2_qualities.tsv` — Table summarizing the quality metrics of the dereplicated bins.  
+- `sample_ERR3405607_metabat2_results.63.fasta` — Final bin obtained after dereplication of the input bins.
+
+## Input specifications
+1. Input contigs must have IDs prefixed with the sample ID, separated by a `C`. This is a common practice for both single- and multi-sample binning. Ensure mapping and binning are performed on contig files with these updated contig IDs.
+
+2. Ensure that headers in the fastq files have read ID separated from sequencer details by a space or tab, not by a dot. This is important for `seqtk`, which is used by MAGmax, to fetch reads correctly.
+
+    `Correct format: @SRR25448374.1 A00214R:157:HLMVMDSXY:1:1101:19868:1016:N:0.length=151#0/1`
+
+    `Wrong format: @SRR25448374.1.A00214R:157:HLMVMDSXY:1:1101:19868:1016:N:0.length=151#0/1`
+
+To fix, use the below bash command
+
+    sed -i -E 's/^(@[^.]+\.[^.]+)\./\1 /' read.fastq
+
+3. Mapid files can be created using [`aligner2counts`] (https://github.com/soedinglab/binning_benchmarking/tree/main/util#aligner2counts) with the `only-mapids` option. An example file format is given below,
 
     File name: `<sampleid>_mapids`
     ```
@@ -107,18 +137,9 @@ This example test run demonstrates dereplication of bins using the provided toy 
     read4_id    <sampleid>Ccontig4_id
     ```
 
-3. If input bins are not separated by sample IDs, such as when using MetaBAT2 or COMEBin on a concatenated set of contigs, use the `--split` option to automatically separate input bin by sample IDs.
-4. Make sure that headers in the read fastq files have read_id separated by space/tab (not by `.`) from other sequencer details. This is important for `seqtk` to fetch reads correctly.
+4. FASTQ and MAPID filenames must contain the sample ID (e.g., SRR25448374.fastq, SRR25448374_mapids). This is the default unless filenames are renamed manually.
 
-    `Correct format: @SRR25448374.1 A00214R:157:HLMVMDSXY:1:1101:19868:1016:N:0.length=151#0/1`
+## Notes
+1. If input bins are not separated by sample IDs (e.g., when using MetaBAT2 or COMEBin on concatenated contigs), use the `--split` option to let MAGmax automatically separate bins by sample ID.
 
-    `Wrong format: @SRR25448374.1.A00214R:157:HLMVMDSXY:1:1101:19868:1016:N:0.length=151#0/1`
-
-When read ids are not seperated by space in the headers, run the below script and use the updated read file for mapping.
- 
-    sed -i -E 's/^(@[^.]+\.[^.]+)\./\1 /' read.fastq
-
-MAGma works for paired-end (in separate files: SRR25448374_1.fastq and SRR25448374_2.fastq) and single-end read files.
-
-5. Sample IDs must be in the file name of fastq and mapid files. (E.g., SRR25448374_1.fastq & SRR25448374_2.fastq or SRR25448374.fastq and SRR25448374_mapids)
-6. We recommend Spades for reassembly which produces bins with higher purity than bins assembled using Megahit.
+2. We recommend Spades for reassembly which produces bins with higher purity than bins assembled using Megahit.

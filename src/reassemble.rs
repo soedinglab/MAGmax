@@ -53,27 +53,36 @@ pub fn run_reassembly(
     let mut selected_contamination: Option<f64> = None;
 
     // Find the best bin based on quality score within the cluster
-    if let Some((bin_name, completeness, contamination)) = component
-        .iter()
-        .filter_map(|bin| {
-            bin_qualities.get(bin).map(|quality| (bin, quality.completeness, quality.contamination))
-        })
-        .filter(|(_, completeness, _)| *completeness >= completeness_cutoff)
-        .max_by(|(_, completeness1, contamination1), (_, completeness2, contamination2)| {
+    // if let Some((bin_name, completeness, contamination)) = component
+    //     .iter()
+    //     .filter_map(|bin| {
+    //         bin_qualities.get(bin).map(|quality| (bin, quality.completeness, quality.contamination))
+    //     })
+    //     .filter(|(_, completeness, _)| *completeness >= completeness_cutoff)
+    //     .max_by(|(_, completeness1, contamination1), (_, completeness2, contamination2)| {
 
-            let score1 = completeness1 - (5.0 * contamination1);
-            let score2 = completeness2 - (5.0 * contamination2);
+    //         let score1 = completeness1 - (5.0 * contamination1);
+    //         let score2 = completeness2 - (5.0 * contamination2);
             
-            score1
-                .partial_cmp(&score2)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| contamination1.partial_cmp(contamination2).unwrap_or(std::cmp::Ordering::Equal).reverse())
-        })
+    //         score1
+    //             .partial_cmp(&score2)
+    //             .unwrap_or(std::cmp::Ordering::Equal)
+    //             .then_with(|| contamination1.partial_cmp(contamination2).unwrap_or(std::cmp::Ordering::Equal).reverse())
+    //     })
+    // {
+    //     selected_bin = Some(bin_name.to_string());
+    //     selected_completeness = Some(completeness);
+    //     selected_contamination = Some(contamination);
+    // }
+
+    if let Some((bin_name, completeness, contamination)) =
+        find_bestqualitybin(component, &bin_qualities, completeness_cutoff)
     {
-        selected_bin = Some(bin_name.to_string());
+        selected_bin = Some(bin_name);
         selected_completeness = Some(completeness);
         selected_contamination = Some(contamination);
     }
+    
     let selected_quality_score = selected_completeness
     .zip(selected_contamination)
     .map(|(completeness, contamination)| completeness - (5.0 * contamination))
@@ -259,8 +268,36 @@ fn filterscaffold(input_file: &PathBuf) -> io::Result<()> {
     Ok(())
 }
 
+// Find the best bin from a cluster based on the quality score
+pub fn find_bestqualitybin(
+    component: &HashSet<String>,
+    bin_qualities: &HashMap<String, BinQuality>,
+    completeness_cutoff: f64,
+) -> Option<(String, f64, f64)> {
+    component
+    .iter()
+    .filter_map(|bin| {
+        bin_qualities.get(bin).map(|quality| {
+            (bin.clone(), quality.completeness, quality.contamination)
+        })
+    })
+    .filter(|(_, completeness, _)| *completeness >= completeness_cutoff)
+    .max_by(|(_, completeness1, contamination1), (_, completeness2, contamination2)| {
+        let score1 = completeness1 - (5.0 * contamination1);
+        let score2 = completeness2 - (5.0 * contamination2);
+
+        score1
+        .partial_cmp(&score2)
+        .unwrap_or(std::cmp::Ordering::Equal)
+        .then_with(|| contamination1
+            .partial_cmp(contamination2)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .reverse())
+    })
+}
+
 // Select the best bin among the cluster members and reassembled bin
-fn select_bestqualitybin(
+pub fn select_bestqualitybin(
     selected_bin: Option<String>,
     bindir: &PathBuf,
     outputpath: &PathBuf,

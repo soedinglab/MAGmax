@@ -20,10 +20,15 @@ mod reassemble;
 // check for valid input paths
 fn validate_paths(cli: &Cli) -> io::Result<(PathBuf, PathBuf, PathBuf)> {
     let bindir = utility::validate_path(Some(&cli.bindir), "bindir", &cli.format);
-    let mapdir = utility::validate_path(Some(&cli.mapdir), "mapdir", "_mapids");
-    let readdir = utility::validate_path(Some(&cli.readdir), "readdir", ".fastq");
 
-    Ok((bindir.to_path_buf(), mapdir.to_path_buf(), readdir.to_path_buf()))
+    if cli.no_reassembly {
+        Ok((bindir.to_path_buf(), PathBuf::new(), PathBuf::new()))
+    } else {
+        let mapdir = utility::validate_path(cli.mapdir.as_ref(), "mapdir", "_mapids");
+        let readdir = utility::validate_path(cli.readdir.as_ref(), "readdir", ".fastq");
+        Ok((bindir.to_path_buf(), mapdir.to_path_buf(), readdir.to_path_buf()))
+    }
+
 }
 
 #[derive(Parser)]
@@ -34,12 +39,14 @@ struct Cli {
     bindir: PathBuf,
 
     /// Directory containing read files
-    #[arg(short = 'r', long = "readdir", help = "Directory containing read files")]
-    readdir: PathBuf,
+    #[arg(short = 'r', long = "readdir", help = "Directory containing read files",
+        requires_if("false", "no_reassembly"))]
+    readdir: Option<PathBuf>,
 
     /// Directory containing mapids files derived from alignment sam/bam files
-    #[arg(short = 'm', long = "mapdir", help = "Directory containing mapids files")]
-    mapdir: PathBuf,
+    #[arg(short = 'm', long = "mapdir", help = "Directory containing mapids files",
+        requires_if("false", "no_reassembly"))]
+    mapdir: Option<PathBuf>,
 
     /// Average Nucleotide Identity cutoff
     #[arg(short = 'i', long = "ani", default_value_t = 99.0, help = "ANI for clustering bins (%)")]
@@ -60,6 +67,11 @@ struct Cli {
     /// Number of threads to use
     #[arg(short = 't', long = "threads", default_value_t = 8, help = "Number of threads to use")]
     threads: usize,
+    
+    /// Disable reassembly step
+    #[arg(long = "no-reassembly", help = "Perform dereplication without bin merging and reassembly",
+        conflicts_with_all = ["readdir", "mapdir"])]
+    no_reassembly: bool,
 
     /// First split bins before merging (if provided, set to true)
     #[arg(long = "split", help = "Split clusters into sample-wise bins before processing")]
@@ -70,7 +82,7 @@ struct Cli {
     qual: Option<PathBuf>,
 
     /// Assembler choice
-    #[arg(long = "assembler", default_value = "spades", help = "assembler choice for reassembly step (spades|megahit), spades is recommended")]
+    #[arg(long = "assembler", default_value = "spades", help = "Assembler choice for reassembly step (spades|megahit), spades is recommended")]
     assembler: String,
 
 }
@@ -90,34 +102,31 @@ fn main() -> io::Result<()> {
     let split = cli.split;
     let assembler: String = cli.assembler;
     let qual = cli.qual;
+    let no_reassembly = cli.no_reassembly;
     let parentdir = bindir.parent().map(PathBuf::from).unwrap_or_else(|| bindir.clone());
     
-    info!("Starting MAGma with parameters:");
+    info!("Starting MAGmax with parameters:");
     info!("  🔹 Bins Directory: {:?}", bindir);
     info!("  🔹 ANI Cutoff: {:.1}%", cli.ani);
     info!("  🔹 Completeness Cutoff: {:.1}%", cli.completeness_cutoff);
     info!("  🔹 Purity/Contamination: {:.1}%/{:.1}%", cli.purity_cutoff, contamination_cutoff);
-    info!("  🔹 Map Directory: {:?}", mapdir);
-    info!("  🔹 Read Directory: {:?}", readdir);
     info!("  🔹 File Format: {}", format);
     info!("  🔹 Threads: {}", threads);
-    info!("  🔹 Assembler: {}", assembler);
 
-    if !["spades", "megahit"].contains(&assembler.as_str()) {
-        error!("Error: Invalid assembler choice '{}'. Allowed options: 'spades' or 'megahit'.", assembler);
-        exit(1);
+    if !no_reassembly {
+        info!("  🔹 Map Directory: {:?}", mapdir);
+        info!("  🔹 Read Directory: {:?}", readdir);
+        info!("  🔹 Assembler: {}", assembler);
+        if !["spades", "megahit"].contains(&assembler.as_str()) {
+            error!("Error: Invalid assembler choice '{}'. Allowed options: 'spades' or 'megahit'.", assembler);
+            exit(1);
+        }
     }
 
-    let is_paired: bool = utility::check_paired_reads(&readdir);
-    if is_paired {
-        info!("Detected paired end \
-        reads in separate files as \
-        <sampleid>_1.fastq \
-        and <sampleid>_2.fastq.")
-    } else {
-        info!("Detected single-end reads as <sampleid>.fastq.")
+    if no_reassembly{
+        info!("  🔸 MAGmax runs dereplication of input bins without bin merging and reassembly");
     }
-    
+
     let binfiles = utility::get_binfiles(&bindir,&format)?;
 
     if binfiles.is_empty() {
@@ -271,10 +280,10 @@ fn main() -> io::Result<()> {
                 &format,
                 &bin_qualities,
                 &merged_bin_quality,
-                is_paired,
                 &assembler,
                 completeness_cutoff,
                 contamination_cutoff,
+                no_reassembly,
                 id,
             )
             .map_err(|e| {
@@ -284,19 +293,22 @@ fn main() -> io::Result<()> {
         })
         .expect("Error during processing components");
     });
+
+    if !no_reassembly {
+        {
+            let merged_bin_qualities = merged_bin_qualities.lock().unwrap();
     
-    {
-        let merged_bin_qualities = merged_bin_qualities.lock().unwrap();
-
-        for (key, value) in merged_bin_qualities.iter() {
-            bin_qualities.insert(key.to_string(), value.clone());
+            for (key, value) in merged_bin_qualities.iter() {
+                bin_qualities.insert(key.to_string(), value.clone());
+            }
         }
+    
     }
-
+    
     // Final dereplication using skani
     let _ = merge::drep_finalbins(&resultdir, &bin_qualities, ani_cutoff);
        
-    info!("MAGma is successfully completed!");  
+    info!("MAGmax is successfully completed!");  
 
     Ok(())
 }
@@ -312,10 +324,10 @@ fn process_components(
     format: &String,
     bin_qualities: &HashMap<String, BinQuality>,
     merged_bin_quality: &Arc<Mutex<HashMap<String, BinQuality>>>,
-    is_paired: bool,
     assembler: &String,
     completeness_cutoff: f64,
     contamination_cutoff: f64,
+    no_reassembly: bool,
     id: usize,
 ) -> io::Result<()> {
 
@@ -342,6 +354,34 @@ fn process_components(
         return Ok(());
     }
 
+    // If no_reassembly is enabled, just select the best quality bin from each cluster
+    if no_reassembly {
+        let mut selected_bin: Option<String> = None;
+        if let Some((bin_name, _, _)) =
+        reassemble::find_bestqualitybin(component, &bin_qualities, completeness_cutoff)
+        {
+            selected_bin = Some(bin_name);
+        }
+
+        let _ = reassemble::select_bestqualitybin(
+            selected_bin,
+            bindir,
+            resultdir,
+            format
+        );
+
+        return Ok(());
+    }
+
+    let is_paired: bool = utility::check_paired_reads(&readdir);
+    if is_paired {
+        info!("Detected paired end \
+        reads in separate files as \
+        <sampleid>_1.fastq \
+        and <sampleid>_2.fastq.")
+    } else {
+        info!("Detected single-end reads as <sampleid>.fastq.")
+    }
     // eg. selected_binset_path = <bindir>/0_combined/
     let selected_binset_path = 
         resultdir.join(format!("{}_combined", id));
@@ -367,7 +407,6 @@ fn process_components(
     let all_enriched_scaffolds = utility::read_fasta(
         &selected_binset_path.join("combined.fasta").to_string_lossy()
     )?;
-    
 
     let scaffold_inputname:&str = "combined";
 
