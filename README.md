@@ -20,6 +20,15 @@ The output directory contains dereplicated bins, and a text file listing the com
     magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 -q quality_report.tsv // if CheckM2 result is already available
     magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 --split // if input bins are not already split by sample id
 
+
+## Dereplication without reassembly
+MAGmax provides an option to peform dereplication without reassembly using `--no-reassembly` flag. In this mode, MAGmax selects the best bin within each genomic cluster based on a quality score (defined as completeness - 5 * contamination) that also meets the user-defined completeness and contamination thresholds. When this option is enabled, only the bin directory (`-b`) is required as input.
+
+    magmax -b <binsdir> --no-reassembly -f fasta -t 24
+    magmax -b <binsdir> --no-reassembly -f fasta -t 24 -q quality_report.tsv // if CheckM2 result is already available
+    magmax -b <binsdir> --no-reassembly -f fasta -t 24 --split // if input bins are not already split by sample id
+
+
 ## Installation
 ### Prerequisites
 
@@ -94,6 +103,12 @@ Option 2: Build from source
 This example test run demonstrates dereplication of bins using the provided toy dataset. In the `test/bins` directory, example bins generated with MetaBAT2 are given. In the `test/reads` directory, paired-end read files for two samples are given and in the `test/mapids` directory, mapid files mapping reads to contigs for each sample are given. Precomputed CheckM2 quality scores for the input bins are given in the `test/quality_report.tsv`. Run the following command to execute the test:
 
     magmax -b test/bins -r test/reads -m test/mapids -t 24 -q test/quality_report.tsv
+After running MAGmax, an output folder named `mags_50comp_95purity` will be created in the `test` directory. This folder contains the following files:
+
+To run without reassembly,
+
+    magmax -b test/bins --no-reassembly -t 24 -q test/quality_report.tsv // run dereplication without reassembly
+
 After running MAGmax, an output folder named `mags_50comp_95purity` will be created in the `test` directory. This folder contains the following files:
 
 - `bins_checkm2_qualities.tsv` — Table summarizing the quality metrics of the dereplicated bins.  
