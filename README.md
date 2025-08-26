@@ -1,5 +1,6 @@
 # MAGmax
 MAGmax is a dereplication tool designed to maximize the recovery of Metagenome-Assembled Genomes (MAGs) through bin Merging and reAssembly. It performs dereplication in three stages: (i) grouping bins based on average sequence identity, (ii) merging bins within each group, and (iii) reassembling the merged bins.
+<img width="4627" height="1279" alt="MAGmax" src="https://github.com/user-attachments/assets/78c8774f-c5cc-42bf-b871-5ff1e66365bc" />
 
 ## Inputs
 MAGmax requires three input directories,
