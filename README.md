@@ -103,7 +103,6 @@ Option 2: Build from source
 This example test run demonstrates dereplication of bins using the provided toy dataset. In the `test/bins` directory, example bins generated with MetaBAT2 are given. In the `test/reads` directory, paired-end read files for two samples are given and in the `test/mapids` directory, mapid files mapping reads to contigs for each sample are given. Precomputed CheckM2 quality scores for the input bins are given in the `test/quality_report.tsv`. Run the following command to execute the test:
 
     magmax -b test/bins -r test/reads -m test/mapids -t 24 -q test/quality_report.tsv
-After running MAGmax, an output folder named `mags_50comp_95purity` will be created in the `test` directory. This folder contains the following files:
 
 To run without reassembly,
 
