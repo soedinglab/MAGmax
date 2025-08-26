@@ -8,7 +8,4 @@ dependencies:
   - megahit
   - spades
   - seqtk
-  - checkm2
   - pip
-  - pip:
-      - checkm2
