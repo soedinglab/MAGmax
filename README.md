@@ -20,18 +20,6 @@ The output directory contains dereplicated bins, and a text file listing the com
     magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 -q quality_report.tsv // if CheckM2 result is already available
     magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 --split // if input bins are not already split by sample id
 
-<<<<<<< HEAD
-=======
-
-## Dereplication without reassembly
-MAGmax provides an option to peform dereplication without reassembly using `--no-reassembly` flag. In this mode, MAGmax selects the best bin within each genomic cluster based on a quality score (defined as completeness - 5 * contamination) that also meets the user-defined completeness and contamination thresholds. When this option is enabled, only the bin directory (`-b`) is required as input.
-
-    magmax -b <binsdir> --no-reassembly -f fasta -t 24
-    magmax -b <binsdir> --no-reassembly -f fasta -t 24 -q quality_report.tsv // if CheckM2 result is already available
-    magmax -b <binsdir> --no-reassembly -f fasta -t 24 --split // if input bins are not already split by sample id
-
-
->>>>>>> origin/no-reassembly
 ## Installation
 ### Prerequisites
 
@@ -108,21 +96,9 @@ This example test run demonstrates dereplication of bins using the provided toy 
     magmax -b test/bins -r test/reads -m test/mapids -t 24 -q test/quality_report.tsv
 After running MAGmax, an output folder named `mags_50comp_95purity` will be created in the `test` directory. This folder contains the following files:
 
-<<<<<<< HEAD
 - `bins_checkm2_qualities.tsv` — Table summarizing the quality metrics of the dereplicated bins.  
 - `sample_ERR3405607_metabat2_results.63.fasta` — Final bin obtained after dereplication of the input bins.
 
-=======
-To run without reassembly,
-
-    magmax -b test/bins --no-reassembly -t 24 -q test/quality_report.tsv // run dereplication without reassembly
-
-After running MAGmax, an output folder named `mags_50comp_95purity` will be created in the `test` directory. This folder contains the following files:
-
-- `bins_checkm2_qualities.tsv` — Table summarizing the quality metrics of the dereplicated bins.  
-- `sample_ERR3405607_metabat2_results.63.fasta` — Final bin obtained after dereplication of the input bins.
-
->>>>>>> origin/no-reassembly
 ## Input specifications
 1. Input contigs must have IDs prefixed with the sample ID, separated by a `C`. This is a common practice for both single- and multi-sample binning. Ensure mapping and binning are performed on contig files with these updated contig IDs.
 
