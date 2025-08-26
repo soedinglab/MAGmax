@@ -3,11 +3,11 @@ MAGmax is a dereplication tool designed to maximize the recovery of Metagenome-A
 
 ## Inputs
 MAGmax requires three input directories,
-1. `binsdir`, directory containing bin files in FASTA format that need to be dereplicated. (e.g., output files from any metagenome binning tool)
+1. `<binsdir>`, directory containing bin files in FASTA format that need to be dereplicated. (e.g., output files from any metagenome binning tool)
 
-2. `readdir`, directory containing read files in FASTQ format for each sample. 
+2. `<readdir>`, directory containing read files in FASTQ format for each sample. 
    
-3. `mapid_dir`, directory containing mapping files for each sample. Each file is a text file listing read IDs and the corresponding contig IDs they mapped to. These files are used to retrieve reads that map to each merged bin from the FASTQ files in `readdir` and to generate new bin-specific FASTQ files for reassembly.
+3. `<mapid_dir>`, directory containing mapping files for each sample. Each file is a text file listing read IDs and the corresponding contig IDs they mapped to. These files are used to retrieve reads that map to each merged bin from the FASTQ files in `readdir` and to generate new bin-specific FASTQ files for reassembly.
 
 ## Outputs
 An output directory named `mags_<x>comp_<y>purity` will be created, where `x` and `y` correspond to the user-specified completeness and purity thresholds used to select final bins. By default, MAGmax uses a percentage of 50 for completeness and 95 for purity.
