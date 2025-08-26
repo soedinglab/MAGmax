@@ -1,6 +1,6 @@
 # MAGmax
 MAGmax is a dereplication tool designed to maximize the recovery of Metagenome-Assembled Genomes (MAGs) through bin Merging and reAssembly. It performs dereplication in three stages: (i) grouping bins based on average sequence identity, (ii) merging bins within each group, and (iii) reassembling the merged bins.
-![Maxmax](https://github.com/user-attachments/assets/d5f01672-d894-4554-9329-ca5f324395f8)
+![MAGmax](https://github.com/user-attachments/assets/802387bf-ae34-48b5-963f-978a0e2d10d5)
 
 ## Inputs
 MAGmax requires three input directories,
@@ -19,7 +19,16 @@ The output directory contains dereplicated bins, and a text file listing the com
 
     magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24
     magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 -q quality_report.tsv // if CheckM2 result is already available
-    magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 --split // if input bins are not already split by sample id 
+    magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 --split // if input bins are not already split by sample id
+
+
+## Dereplication without reassembly
+MAGmax provides an option to peform dereplication without reassembly using `--no-reassembly` flag. In this mode, MAGmax selects the best bin within each genomic cluster based on a quality score (defined as completeness - 5 * contamination) that also meets the user-defined completeness and contamination thresholds. When this option is enabled, only the bin directory (`-b`) is required as input.
+
+    magmax -b <binsdir> --no-reassembly -f fasta -t 24
+    magmax -b <binsdir> --no-reassembly -f fasta -t 24 -q quality_report.tsv // if CheckM2 result is already available
+    magmax -b <binsdir> --no-reassembly -f fasta -t 24 --split // if input bins are not already split by sample id
+
 
 ## Installation
 ### Prerequisites
@@ -64,26 +73,28 @@ Option 2: Build from source
 ## Options
         -b, --bindir <BINDIR>
                 Directory containing fasta files of bins
+        -r, --readdir <READDIR>
+                Directory containing read files
+        -m, --mapdir <MAPDIR>
+                Directory containing mapids files
         -i, --ani <ANI>
                 ANI for clustering bins (%) [default: 99]
         -c, --completeness <COMPLETENESS_CUTOFF>
                 Minimum completeness of bins (%) [default: 50]
         -p, --purity <PURITY_CUTOFF>
                 Mininum purity (1- contamination) of bins (%) [default: 95]
-        -m, --mapdir <MAPDIR>
-                Directory containing mapids files
-        -r, --readdir <READDIR>
-                Directory containing read files
         -f, --format <FORMAT>
                 Bin file extension [default: fasta]
         -t, --threads <THREADS>
                 Number of threads to use [default: 8]
+            --no-reassembly
+                Perform dereplication without bin merging and reassembly
             --split
                 Split clusters into sample-wise bins before processing
         -q, --qual <QUAL>
                 Quality file produced by CheckM2 (quality_report.tsv)
             --assembler <ASSEMBLER>
-                assembler choice for reassembly step (spades|megahit) [default: spades, recommended]
+                Assembler choice for reassembly step (spades|megahit), spades is recommended [default: spades]
         -h, --help
                 Print help
         -V, --version
@@ -93,6 +104,11 @@ Option 2: Build from source
 This example test run demonstrates dereplication of bins using the provided toy dataset. In the `test/bins` directory, example bins generated with MetaBAT2 are given. In the `test/reads` directory, paired-end read files for two samples are given and in the `test/mapids` directory, mapid files mapping reads to contigs for each sample are given. Precomputed CheckM2 quality scores for the input bins are given in the `test/quality_report.tsv`. Run the following command to execute the test:
 
     magmax -b test/bins -r test/reads -m test/mapids -t 24 -q test/quality_report.tsv
+
+To run without reassembly,
+
+    magmax -b test/bins --no-reassembly -t 24 -q test/quality_report.tsv // run dereplication without reassembly
+
 After running MAGmax, an output folder named `mags_50comp_95purity` will be created in the `test` directory. This folder contains the following files:
 
 - `bins_checkm2_qualities.tsv` — Table summarizing the quality metrics of the dereplicated bins.  
