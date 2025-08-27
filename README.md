@@ -60,7 +60,7 @@ To use this option, in addition to CheckM2, [skani](https://github.com/bluenote-
     conda env create -f environment.yml
     conda activate magmax_env
 
-Option 2: Build from source
+Option 3: Build from source
 
     git clone https://github.com/soedinglab/MAGmax.git
     cd MAGmax
