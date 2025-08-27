@@ -23,7 +23,7 @@ The output directory contains dereplicated bins, and a text file listing the com
 
 
 ## Dereplication without reassembly
-MAGmax provides an option to peform dereplication without reassembly using `--no-reassembly` flag. In this mode, MAGmax selects the best bin within each genomic cluster based on a quality score (defined as completeness - 5 * contamination) that also meets the user-defined completeness and contamination thresholds. When this option is enabled, only the bin directory (`-b`) is required as input.
+MAGmax provides an option to perform dereplication without reassembly using `--no-reassembly` flag. In this mode, MAGmax selects the best bin within each genomic cluster based on a quality score (defined as completeness - 5 * contamination) that also meets the user-defined completeness and contamination thresholds. When this option is enabled, only the bin directory (`-b`) is required as input.
 
     magmax -b <binsdir> --no-reassembly -f fasta -t 24
     magmax -b <binsdir> --no-reassembly -f fasta -t 24 -q quality_report.tsv // if CheckM2 result is already available
