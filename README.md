@@ -49,7 +49,7 @@ Option 1: Use conda package
 Option 2: Use the pre-built executable.
 
     # For x86_64 Linux (glibc-based systems)
-    wget https://github.com/soedinglab/MAGma/releases/download/v1.0.0/magmax-linux.tar.gz
+    wget https://github.com/soedinglab/MAGmax/releases/download/v1.0.0/magmax-linux.tar.gz
     cd magmax-linux/bin
     chmod +x magmax
     ./magmax -h
