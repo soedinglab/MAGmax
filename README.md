@@ -145,3 +145,6 @@ To fix, use the below bash command
 1. If input bins are not separated by sample IDs (e.g., when using MetaBAT2 or COMEBin on concatenated contigs), use the `--split` option to let MAGmax automatically separate bins by sample ID.
 
 2. We recommend Spades for reassembly which produces bins with higher purity than bins assembled using Megahit.
+
+## Citation
+Arangasamy Yazhini, Johannes Söding, Enhancing genome recovery across metagenomic samples using MAGmax, Bioinformatics (2025),https://doi.org/10.1093/bioinformatics/btaf538.
