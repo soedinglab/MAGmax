@@ -147,4 +147,4 @@ To fix, use the below bash command
 2. We recommend Spades for reassembly which produces bins with higher purity than bins assembled using Megahit.
 
 ## Citation
-Arangasamy Yazhini, Johannes Söding, Enhancing genome recovery across metagenomic samples using MAGmax, Bioinformatics (2025),https://doi.org/10.1093/bioinformatics/btaf538.
+Arangasamy Yazhini, Johannes Söding, Enhancing genome recovery across metagenomic samples using MAGmax, Bioinformatics (2025), https://doi.org/10.1093/bioinformatics/btaf538.
