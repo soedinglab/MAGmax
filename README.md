@@ -109,6 +109,8 @@ To run without reassembly,
 
     magmax -b test/bins --no-reassembly -t 24 -q test/quality_report.tsv // run dereplication without reassembly
 
+User can provide a custom quality score file with bin ID, completeness and contamination columns in same format as CheckM2 tsv output.
+
 After running MAGmax, an output folder named `mags_50comp_95purity` will be created in the `test` directory. This folder contains the following files:
 
 - `bins_checkm2_qualities.tsv` — Table summarizing the quality metrics of the dereplicated bins.  
