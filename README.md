@@ -109,8 +109,6 @@ To run without reassembly,
 
     magmax -b test/bins --no-reassembly -t 24 -q test/quality_report.tsv // run dereplication without reassembly
 
-User can provide a custom quality score file with bin ID, completeness and contamination columns in same format as CheckM2 tsv output.
-
 After running MAGmax, an output folder named `mags_50comp_95purity` will be created in the `test` directory. This folder contains the following files:
 
 - `bins_checkm2_qualities.tsv` — Table summarizing the quality metrics of the dereplicated bins.  
@@ -144,9 +142,11 @@ To fix, use the below bash command
 4. FASTQ and MAPID filenames must contain the sample ID (e.g., SRR25448374.fastq, SRR25448374_mapids). This is the default unless filenames are renamed manually.
 
 ## Notes
-1. If input bins are not separated by sample IDs (e.g., when using MetaBAT2 or COMEBin on concatenated contigs), use the `--split` option to let MAGmax automatically separate bins by sample ID.
+1. User can provide a custom quality score file with bin ID, completeness and contamination columns in same format as CheckM2 tsv output.
 
-2. We recommend Spades for reassembly which produces bins with higher purity than bins assembled using Megahit.
+2. If input bins are not separated by sample IDs (e.g., when using MetaBAT2 or COMEBin on concatenated contigs), use the `--split` option to let MAGmax automatically separate bins by sample ID.
+
+3. We recommend Spades for reassembly which produces bins with higher purity than bins assembled using Megahit.
 
 ## Citation
 Arangasamy Yazhini, Johannes Söding, Enhancing genome recovery across metagenomic samples using MAGmax, Bioinformatics (2025), https://doi.org/10.1093/bioinformatics/btaf538.
