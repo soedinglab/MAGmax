@@ -353,7 +353,10 @@ fn process_components(
             if quality.completeness >= completeness_cutoff {
                 let bin_path = bindir.join(format!("{}.{}", binname, format));
                 let final_path = resultdir.join(format!("{}.fasta", binname));
-                fs::copy(&bin_path, &final_path).ok();
+                // fs::copy(&bin_path, &final_path).ok();
+                if let Err(e) = fs::copy(&bin_path, &final_path) {
+                    error!("Failed to copy from {:?} to {:?}: {}", bin_path, final_path, e);
+                }
             }
         }
         return Ok(());
