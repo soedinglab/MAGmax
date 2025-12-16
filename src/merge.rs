@@ -4,53 +4,86 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::fs::{remove_file, File};
 use std::io::{self, BufRead, BufReader};
-use petgraph::graph::Graph;
+use petgraph::graph::{Graph};
 use petgraph::graph::NodeIndex;
 use petgraph::visit::Dfs;
-use petgraph::{Undirected, prelude};
+use petgraph::{Undirected};
 use std::process::Command as ProcessCommand;
 use log::{debug, error, info, warn};
 use glob::glob;
-
 use crate::assess::BinQuality;
+use crate::cliques;
 
 /// Compute all-vs-all ANI among bins
 pub fn calc_ani(
     bins: &PathBuf,
     bin_qualities: &HashMap<String, BinQuality>,
     format: &String,
+    anifile: Option<PathBuf>,
     ani_cutoff: f64,
-    contamination_cutoff: f64
-) -> Result<(Graph<String, (), petgraph::Undirected>, HashMap<(String, String), f64>), io::Error> {
-    let ani_output: PathBuf = bins.join("ani_edges");
-    let bin_files: Vec<String> = glob(&format!("{}/*.{}", bins.display(), format))
-    .expect("Failed to read glob pattern")
-    .filter_map(Result::ok)
-    .map(|path| path.to_string_lossy().into_owned())
-    .collect();
-
-    if bin_files.is_empty() {
-        error!("No fasta files found in {:?}", bins);
-        return Err(io::Error::new(io::ErrorKind::NotFound, "No fasta files found"));
-    }
+    contamination_cutoff: f64,
+    alignedfrac: f64,
+    threads: usize
+) -> Result<(Graph<u32, (), petgraph::Undirected>, HashMap<(u32, u32), f64>, Vec<String>), io::Error> {
     
-    let _ = get_ani(bin_files, &ani_output);
+    let ani_output: PathBuf;
 
-    let mut bin_name_to_node: HashMap<String, prelude::NodeIndex> = HashMap::new();
+    if let Some(provided_path) = anifile {
+        if provided_path.exists() {
+            info!("Using provided ANI file at {:?}", provided_path);
+            ani_output = provided_path;
+        } else {
+            info!("Provided ANI file not found; computing ANI ...");
+            ani_output = bins.join("ani_edges");
+
+            let bin_files: Vec<String> = glob(&format!("{}/*.{}", bins.display(), format))
+                .expect("Failed to read glob pattern")
+                .filter_map(Result::ok)
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect();
+
+            if bin_files.is_empty() {
+                error!("No fasta files found in {:?}", bins);
+                return Err(io::Error::new(io::ErrorKind::NotFound, "No fasta files found"));
+            }
+
+            let _ = get_ani(bin_files, &ani_output, threads)?;
+        }
+    } else {
+        ani_output = bins.join("ani_edges");
+        let bin_files: Vec<String> = glob(&format!("{}/*.{}", bins.display(), format))
+            .expect("Failed to read glob pattern")
+            .filter_map(Result::ok)
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect();
+
+        if bin_files.is_empty() {
+            error!("No fasta files found in {:?}", bins);
+            return Err(io::Error::new(io::ErrorKind::NotFound, "No fasta files found"));
+        }
+        
+        let _ = get_ani(bin_files, &ani_output, threads)?;
+    }
+    // let mut bin_name_to_node: HashMap<String, prelude::NodeIndex> = HashMap::new();
+    let mut bin_name_to_id: HashMap<String, u32> = HashMap::new();
+    let mut id_to_name: Vec<String> = Vec::new();
+    let mut id_to_node: HashMap<u32, NodeIndex> = HashMap::new();
+
     let file: File = File::open(ani_output.clone())?;
     let reader: BufReader<File> = io::BufReader::new(file);
 
-    let mut graph: Graph<String, (), Undirected> = Graph::default();
+    let mut graph: Graph<u32, (), Undirected> = Graph::default();
 
+    // Add nodes to graph that pass quality filters
     for (bin, q) in bin_qualities {
         if q.contamination < contamination_cutoff && q.completeness > 20.0 {
-            bin_name_to_node
-                .entry(bin.clone())
-                .or_insert_with(|| graph.add_node(bin.clone()));
+            let id = get_or_assign_id(bin, &mut bin_name_to_id, &mut id_to_name);
+            let node = graph.add_node(id);
+            id_to_node.insert(id, node);
         }
     }
 
-    let mut ani_details = HashMap::<(String, String), f64>::new();
+    let mut ani_details = HashMap::<(u32, u32), f64>::new();
 
     // Create a graph by add edge when ANI > ANI_threshold
     // When file is empty, no edge is formed and all nodes will be Singleton clusters.   
@@ -70,31 +103,42 @@ pub fn calc_ani(
             .file_stem()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| columns[1].to_string());
+
+        let id1 = get_or_assign_id(
+            &bin1, &mut bin_name_to_id, &mut id_to_name);
+        let id2 = get_or_assign_id(
+            &bin2, &mut bin_name_to_id, &mut id_to_name);
     
         let ani: f64 = columns[2].parse().unwrap_or(0.0);
+        let alignfrac_ref: f64 = columns[3].parse().unwrap_or(0.0);
+        let alignfrac_que: f64 = columns[4].parse().unwrap_or(0.0);
     
         // Skani reports pairs only if ANI is >= 80%
-        ani_details.insert((bin1.clone(), bin2.clone()), ani);
-        if ani < ani_cutoff {
+        if ani < ani_cutoff
+            && alignfrac_ref >= alignedfrac
+            && alignfrac_que >= alignedfrac {
             continue;
         }
     
-        if let (Some(&node1), Some(&node2)) = (bin_name_to_node.get(&bin1), bin_name_to_node.get(&bin2)) {
+        if let (Some(&node1), Some(&node2)) = 
+            (id_to_node.get(&id1), id_to_node.get(&id2)) {
             graph.add_edge(node1, node2, ());
+            let key = if id1 <= id2 { (id1, id2) } else { (id2, id1) };
+            ani_details.insert(key, ani as f64);
         }
     }
 
     // Remove skani output file
     // remove_file(&ani_output).ok();
-
-   Ok((graph, ani_details))
+   Ok((graph, ani_details, id_to_name))
 }
 
 /// Find single-linkage connected components
 pub fn get_connected_samples(
-    graph: &Graph<String, (), Undirected>,
-    ani_details: &HashMap<(String, String), f64>,
+    graph: &Graph<u32, (), Undirected>,
+    ani_details: &HashMap<(u32, u32), f64>,
     ani_cutoff: f64,
+    id_to_name: &[String]
 ) -> Vec<HashSet<String>> {
     let mut visited = HashSet::new();
     let mut connected_components = Vec::new();
@@ -116,146 +160,27 @@ pub fn get_connected_samples(
     }
     let mut connected_samples: Vec<HashSet<String>> = vec![];
     for component in connected_components {
+        debug!("Processing component with {} nodes", component.len());
         if component.len() <=2 {
-            connected_samples.push(component);
+            let component_names = component
+                .into_iter()
+                .map(|id| id_to_name[id as usize].clone())
+                .collect();
+            connected_samples.push(component_names);
         } else {
-            let mut subclusters = split_component_into_cliques(component, ani_details, ani_cutoff);
-            connected_samples.append(&mut subclusters);
+            let mut subclusters = 
+                cliques::split_component_into_cliques(component, ani_details, ani_cutoff);
+            for cluster in subclusters.drain(..) {
+                let component_names: HashSet<String> = cluster
+                    .into_iter()
+                    .map(|id| id_to_name[id as usize].clone())
+                    .collect();
+                connected_samples.push(component_names);
+            }
         }
     }
+    debug!("connected samples completed");
     connected_samples
-}
-
-// Get clique clusters
-fn split_component_into_cliques(
-    component: HashSet<String>,
-    ani_details: &HashMap<(String, String), f64>,
-    ani_cutoff: f64,
-) -> Vec<HashSet<String>> {
-    let mut subgraph = Graph::<String, (), petgraph::Undirected>::default();
-    let mut node_map = HashMap::new();
-
-    for bin in &component {
-        let node_index = subgraph.add_node(bin.clone());
-        node_map.insert(bin.clone(), node_index);
-    }
-
-    // Add edges if ANI is above cutoff
-    for (bin1, bin2) in component.iter().flat_map(|b1| {
-        component.iter().map(move |b2| (b1.clone(), b2.clone()))
-    }) {
-        if bin1 != bin2 {
-            if let Some(&ani) = ani_details
-                    .get(&(bin1.clone(), bin2.clone()))
-                    .or_else(|| ani_details.get(&(bin2.clone(), bin1.clone()))) {
-                if ani >= ani_cutoff {
-                    if let (Some(&n1), Some(&n2)) = (node_map.get(&bin1), node_map.get(&bin2)) {
-                        subgraph.add_edge(n1, n2, ());
-                    }
-                }
-            }
-        }
-    }
-
-    let mut cliques = Vec::new();
-    let all_nodes: HashSet<NodeIndex> = subgraph.node_indices().collect();
-
-    // Get maximal cliques
-    bron_kerbosch(&subgraph, &mut HashSet::new(), &mut all_nodes.clone(), &mut HashSet::new(), &mut cliques);
-
-    let mut subclusters: Vec<HashSet<String>> = cliques
-        .into_iter()
-        .map(|clique| clique.into_iter().collect())
-        .collect();
-
-    if subclusters.is_empty() {
-        debug!("No clique was found for component {:?}. How can this happen? investigate", component);
-        return component.into_iter().map(|node| vec![node].into_iter().collect()).collect();
-    }
-
-    let assigned_nodes: HashSet<String> = subclusters.iter().flatten().cloned().collect();
-    let unassigned_nodes: Vec<String> = component.difference(&assigned_nodes).cloned().collect();
-    let mut singletons = Vec::new();
-    for node in unassigned_nodes {
-        let mut potential_clique: Option<usize> = None;
-        let mut valid = true;
-
-        for (i, clique) in subclusters.iter().enumerate() {
-            let mut all_ani_above_99 = true;
-            let mut has_any_link = false;
-
-            for clique_node in clique {
-                if let Some(&ani) = ani_details
-                        .get(&(node.clone(), clique_node.clone()))
-                        .or_else(|| ani_details.get(&(clique_node.clone(), node.clone()))) {
-                    if ani < 99.0 {
-                        all_ani_above_99 = false;
-                    } else {
-                        has_any_link = true;
-                    }
-                }
-            }
-
-            // The node should only have links above 99% to this clique, and not to multiple cliques
-            if has_any_link && all_ani_above_99 {
-                if potential_clique.is_some() {
-                    valid = false;
-                    debug!("Node {} connects to multiple cliques", node);
-                    break;
-                }
-                potential_clique = Some(i);
-            }
-        }
-
-        if valid {
-            if let Some(i) = potential_clique {
-                subclusters[i].insert(node);
-            } else {
-                singletons.push(vec![node].into_iter().collect());
-            }
-        } else {
-            singletons.push(vec![node].into_iter().collect());
-        }
-    }
-    subclusters.extend(singletons);
-
-    subclusters
-}
-
-// Detect maximal cliques
-fn bron_kerbosch(
-    graph: &Graph<String, (), petgraph::Undirected>,
-    r: &mut HashSet<NodeIndex>,
-    p: &mut HashSet<NodeIndex>,
-    x: &mut HashSet<NodeIndex>,
-    cliques: &mut Vec<HashSet<String>>,
-) {
-    if p.is_empty() && x.is_empty() {
-        cliques.push(r.iter().map(|&n| graph[n].clone()).collect());
-        return;
-    }
-
-    let pivot = *p.iter().chain(x.iter()).next().unwrap(); // Choose a pivot
-    let neighbors: HashSet<NodeIndex> = graph
-        .neighbors(pivot)
-        .collect();
-
-    let candidates: Vec<NodeIndex> = p.difference(&neighbors).copied().collect();
-    
-    for v in candidates {
-        let mut new_r = r.clone();
-        let mut new_p = p.clone();
-        let mut new_x = x.clone();
-
-        new_r.insert(v);
-        new_p.retain(|&n| graph.contains_edge(v, n));
-        new_x.retain(|&n| graph.contains_edge(v, n));
-
-        bron_kerbosch(graph, &mut new_r, &mut new_p, &mut new_x, cliques);
-
-        p.remove(&v);
-        x.insert(v);
-    }
 }
 
 /// Merged bin files within the cluster
@@ -291,26 +216,33 @@ pub fn combine_fastabins(
 pub fn drep_finalbins(
     result_dir: &PathBuf,
     bin_qualities: &HashMap<String, BinQuality>,
-    ani_cutoff: f64
+    ani_cutoff: f64,
+    threads: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ani_output: PathBuf = result_dir.join("ani_edges");
+    debug!("Starting drep_finalbins with ani_output: {:?}", ani_output);
     let finalbin_files: Vec<PathBuf> = glob(&format!("{}/*.fasta", result_dir.display()))
         .expect("Failed to read glob pattern")
         .filter_map(Result::ok)
         .collect();
-
-    let _ = get_ani(
+    debug!("Final bin files found: {:?}", &finalbin_files[..3]);
+    if let Err(e) = get_ani(
         finalbin_files.iter().map(|p| p.to_string_lossy().into_owned()).collect(), 
-        &ani_output
-    );
-
-    debug!("Bin qualities length after reassembly: {}", bin_qualities.len());
+        &ani_output,
+        threads,
+    ) {
+        error!("Error running skani for dereplication: {}", e);
+        return Err(Box::new(e));
+    };
 
     let file: File = File::open(ani_output.clone())?;
     let reader: BufReader<File> = io::BufReader::new(file);
 
     let mut bins_to_remove: HashSet<String> = HashSet::new();
+    debug!("before for loop in drep_finalbins");
+
     for line in reader.lines().skip(1) {
+
         let line: String = line?;
         let columns: Vec<&str> = line.split('\t').collect();
     
@@ -325,7 +257,8 @@ pub fn drep_finalbins(
             .unwrap_or_else(|| columns[1].to_string());
     
         let ani: f64 = columns[2].parse().expect("Failed to parse ANI value as float from column 3");
-
+        debug!("Comparing bins: {} and {} with ANI: {}", bin1, bin2, ani);
+        // Skani gives results for 80% aligned pairs
         if ani >= ani_cutoff {
             if let (Some(q1), Some(q2)) = (bin_qualities.get(&bin1), bin_qualities.get(&bin2)) {
                 let score1 = q1.completeness - (5.0 * q1.contamination);
@@ -341,6 +274,7 @@ pub fn drep_finalbins(
                     &bin1
                 };
                 bins_to_remove.insert(worse_bin.clone());
+                debug!("bin to be removed {:?}",worse_bin);
             }
         }
     }
@@ -365,11 +299,11 @@ pub fn drep_finalbins(
         }
     }
     
-    if !cfg!(debug_assertions) {
-        if let Err(e) = remove_file(&ani_output) {
-            warn!("Failed to delete folder {:?}: {}", ani_output, e);
-        }
-    }
+    // if !cfg!(debug_assertions) {
+    //     if let Err(e) = remove_file(&ani_output) {
+    //         warn!("Failed to delete folder {:?}: {}", ani_output, e);
+    //     }
+    // }
     
     // Write quality measures of bins
     let output_file_path = result_dir.join("bins_checkm2_qualities.tsv");
@@ -388,22 +322,45 @@ pub fn drep_finalbins(
     Ok(())
 }
 
-
 // Run skani
 fn get_ani (
     inputbins:Vec<String>,
-    ani_output: &PathBuf
+    ani_output: &PathBuf,
+    threads: usize,
 ) -> Result<(), io::Error> {
     let mut command = ProcessCommand::new("skani");
     command.arg("triangle");
     command.args(&inputbins);
     command.arg("-E");
+    command.arg("-t");
+    command.arg(threads.to_string());
+    
+    debug!("Entering skani run");
+    if which::which("skani").is_err() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "`skani` not found in PATH"));
+    }
     
     let output = command.output()?;
     
     if !output.status.success() {
+        debug!("skani stderr: {}", String::from_utf8_lossy(&output.stderr));
         return Err(io::Error::new(io::ErrorKind::Other, "skani triangle failed"));
     }
     std::fs::write(ani_output, output.stdout)?;
     Ok(())
+}
+
+
+fn get_or_assign_id(
+    name: &str,
+    map: &mut HashMap<String, u32>,
+    names: &mut Vec<String>,
+) -> u32 {
+    if let Some(&id) = map.get(name) {
+        return id;
+    }
+    let id = names.len() as u32;
+    map.insert(name.to_owned(), id);
+    names.push(name.to_owned());
+    id
 }

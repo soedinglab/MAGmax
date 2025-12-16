@@ -7,6 +7,7 @@ use std::process::{Command as ProcessCommand, Stdio};
 use log::error;
 
 #[derive(Clone)]
+#[derive(Debug)]
 pub struct BinQuality {
     pub completeness: f64,
     pub contamination: f64,
@@ -76,7 +77,13 @@ pub fn parse_bins_quality(
             error!("Skipping invalid record: {:?}", record);
             continue; // Skip records that do not have enough columns
         }
-        let bin_id: String = record[0].to_string();
+        let mut bin_id: String = record[0].to_string();
+        for ext in [".fasta", ".faa", ".fna", ".fa", ".fas", ".ffn"] {
+            if let Some(stripped) = bin_id.strip_suffix(ext) {
+                bin_id = stripped.to_string();
+                break;
+            }
+        }
         let completeness: f64 = record[1].parse().unwrap_or(0.0);
         let contamination: f64 = record[2].parse().unwrap_or(0.0);
         bin_qualities.insert(bin_id, 

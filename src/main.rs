@@ -14,6 +14,7 @@ use readfetch::fetch_fastqreads;
 mod utility;
 mod assess;
 mod merge;
+mod cliques;
 mod readfetch;
 mod reassemble;
 
@@ -59,6 +60,10 @@ struct Cli {
     /// Purity
     #[arg(short = 'p', long = "purity", default_value_t = 95.0, help = "Mininum purity (1- contamination) of bins (%)")]
     purity_cutoff: f64,
+    
+    /// Alignment fraction covered
+    #[arg(short = 'a', long = "alignedfrac", default_value_t = 0.0, help = "Mininum aligned fraction of (both reference and query) genomes covered in ANI calculation")]
+    alignedfrac: f64,
 
     /// Bin file extension
     #[arg(short = 'f', long = "format", default_value = "fasta", help = "Bin file extension")]
@@ -76,11 +81,15 @@ struct Cli {
     /// First split bins before merging (if provided, set to true)
     #[arg(long = "split", help = "Split clusters into sample-wise bins before processing")]
     split: bool,
-
+        
     /// CheckM2 quality file
     #[arg(short = 'q', long = "qual", help = "Quality file produced by CheckM2 (quality_report.tsv)")]
     qual: Option<PathBuf>,
 
+    /// ANI file
+    #[arg(long = "anifile", help = "ANI file produced by skani")]
+    anifile: Option<PathBuf>,
+    
     /// Assembler choice
     #[arg(long = "assembler", default_value = "spades", help = "Assembler choice for reassembly step (spades|megahit), spades is recommended")]
     assembler: String,
@@ -97,19 +106,24 @@ fn main() -> io::Result<()> {
     let completeness_cutoff = cli.completeness_cutoff;
     let purity_cutoff = cli.purity_cutoff;
     let contamination_cutoff = 100.0 - purity_cutoff;
+    let alignedfrac = cli.alignedfrac;
     let format = cli.format;
     let threads = cli.threads;
     let split = cli.split;
     let assembler: String = cli.assembler;
     let qual = cli.qual;
+    let anifile = cli.anifile;
     let no_reassembly = cli.no_reassembly;
     let parentdir = bindir.parent().map(PathBuf::from).unwrap_or_else(|| bindir.clone());
     
     info!("Starting MAGmax with parameters:");
     info!("  🔹 Bins Directory: {:?}", bindir);
-    info!("  🔹 ANI Cutoff: {:.1}%", cli.ani);
-    info!("  🔹 Completeness Cutoff: {:.1}%", cli.completeness_cutoff);
-    info!("  🔹 Purity/Contamination: {:.1}%/{:.1}%", cli.purity_cutoff, contamination_cutoff);
+    info!("  🔹 ANI Cutoff: {:.2}%", ani_cutoff);
+    info!("  🔹 Completeness Cutoff: {:.1}%", completeness_cutoff);
+    info!("  🔹 Purity/Contamination: {:.1}%/{:.1}%", purity_cutoff, contamination_cutoff);
+    if alignedfrac > 0.0 {
+        info!("  🔹 Aligned fraction cutoff: {:.1}%", alignedfrac);
+    }
     info!("  🔹 File Format: {}", format);
     info!("  🔹 Threads: {}", threads);
 
@@ -123,12 +137,11 @@ fn main() -> io::Result<()> {
         }
     }
 
-    if no_reassembly{
+    if no_reassembly {
         info!("  🔸 MAGmax runs dereplication of input bins without bin merging and reassembly");
     }
 
     let binfiles = utility::get_binfiles(&bindir,&format)?;
-
     if binfiles.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -190,9 +203,16 @@ fn main() -> io::Result<()> {
     }
 
     // Get sample list
-    let bin_sample_map: HashMap<String, String> = utility::get_sample_names(&bindir,&format)?;
-    let sample_count= bin_sample_map.values().collect::<HashSet<_>>().len();
-    info!("{:?} bin files and {:?} samples found", binfiles.len(), sample_count);
+    let bin_sample_map: HashMap<String, String> = if no_reassembly {
+        HashMap::new()
+    } else {
+        utility::get_sample_names(&bindir, &format)?
+    };
+    
+    if !no_reassembly {
+        let sample_count= bin_sample_map.values().collect::<HashSet<_>>().len();
+        info!("{:?} bin files and {:?} samples found", binfiles.len(), sample_count);
+    }
 
     // Obtain quality of bins
     // eg: checkm2_outputpath = <parentpathof_bindir>/mags_90comp_95purity/checkm2_results/
@@ -240,14 +260,19 @@ fn main() -> io::Result<()> {
 
     // None of the bins are pure
     if bin_qualities.len() == 0 {
-        info!("Input {:?} does not have any high pure bins. Or if existing checkm2 result is empty, first remove them before running maga", bindir);
+        info!("Input {:?} does not have any high pure bins. Or if existing checkm2 result is empty, first remove them before running magmax", bindir);
         return Ok(());
     }        
 
+    // for (key, value) in &bin_qualities {
+    //     println!("{:?} => {:#?}", key, value);
+    // }
+    
     debug!("Bin qualities length before reassembly: {}", bin_qualities.len());
-    let (graph, ani_details) = match merge::calc_ani(&bindir, &bin_qualities, &format, ani_cutoff, contamination_cutoff) {
-        Ok((graph, ani_details)) => {
-            (graph, ani_details)
+    
+    let (graph, ani_details, id_to_name) = match merge::calc_ani(&bindir, &bin_qualities, &format, anifile, ani_cutoff, contamination_cutoff, alignedfrac, threads) {
+        Ok((graph, ani_details, id_to_name)) => {
+            (graph, ani_details, id_to_name)
         },
         Err(e) => {
             error!("Error calculating ANI: {}", e);
@@ -255,8 +280,13 @@ fn main() -> io::Result<()> {
         }
     };
     
+    
+    debug!("Genome graph was constructed");
+    
     // Cluster bins based on ANI
-    let connected_bins: Vec<HashSet<String>> = merge::get_connected_samples(&graph, &ani_details, ani_cutoff);
+    let connected_bins: Vec<HashSet<String>> = merge::get_connected_samples(&graph, &ani_details, ani_cutoff, &id_to_name);
+    
+    debug!("Connected component was constructed");
     
     // Collect completeness and purity of merged and reassembled bins
     let merged_bin_qualities: Arc<Mutex<HashMap<String, BinQuality>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -304,9 +334,10 @@ fn main() -> io::Result<()> {
         }
     
     }
-    
+
+    debug!("before final dereplication");
     // Final dereplication using skani
-    let _ = merge::drep_finalbins(&resultdir, &bin_qualities, ani_cutoff);
+    let _ = merge::drep_finalbins(&resultdir, &bin_qualities, ani_cutoff, threads);
        
     info!("MAGmax is successfully completed!");  
 
@@ -330,20 +361,19 @@ fn process_components(
     no_reassembly: bool,
     id: usize,
 ) -> io::Result<()> {
-
-    debug!("{} id component with bins {:?}", id, component);
     
     // eg: comp = {"binname_S1", "binname_S2"}
 
     // Singleton cluster, save the bin in the output
     if component.len() == 1 {
-        let binname = component.into_iter().next().expect("The component is empty.");    
-
+        let binname = component.into_iter().next().expect("The component is empty.");
         if let Some(quality) = bin_qualities.get(binname) {
             if quality.completeness >= completeness_cutoff {
                 let bin_path = bindir.join(format!("{}.{}", binname, format));
                 let final_path = resultdir.join(format!("{}.fasta", binname));
-                fs::copy(&bin_path, &final_path).ok();
+                if let Err(e) = fs::copy(&bin_path, &final_path) {
+                    error!("Failed to copy from {:?} to {:?}: {}", bin_path, final_path, e);
+                }
             }
         }
         return Ok(());
@@ -362,7 +392,7 @@ fn process_components(
         {
             selected_bin = Some(bin_name);
         }
-
+        debug!("selected_bin {:?}", selected_bin);
         let _ = reassemble::select_bestqualitybin(
             selected_bin,
             bindir,
