@@ -295,11 +295,11 @@ pub fn drep_finalbins(
         }
     }
     
-    // if !cfg!(debug_assertions) {
-    //     if let Err(e) = remove_file(&ani_output) {
-    //         warn!("Failed to delete folder {:?}: {}", ani_output, e);
-    //     }
-    // }
+    if !cfg!(debug_assertions) {
+        if let Err(e) = remove_file(&ani_output) {
+            warn!("Failed to delete folder {:?}: {}", ani_output, e);
+        }
+    }
     
     // Write quality measures of bins
     let output_file_path = result_dir.join("bins_checkm2_qualities.tsv");

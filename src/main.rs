@@ -62,7 +62,7 @@ struct Cli {
     purity_cutoff: f64,
     
     /// Alignment fraction covered
-    #[arg(short = 'a', long = "alignedfrac", default_value_t = 0.0, help = "Mininum aligned fraction of (both reference and query) genomes covered in ANI calculation")]
+    #[arg(short = 'a', long = "alignedfrac", default_value_t = 0.0, help = "Mininum aligned fraction of (both reference and query) genomes covered in the ANI calculation")]
     alignedfrac: f64,
 
     /// Bin file extension
@@ -87,7 +87,7 @@ struct Cli {
     qual: Option<PathBuf>,
 
     /// ANI file
-    #[arg(long = "anifile", help = "ANI file produced by skani")]
+    #[arg(long = "anifile", help = "ANI file produced by skani using command: skani triangle <bindir> -E -o <anifile>")]
     anifile: Option<PathBuf>,
     
     /// Assembler choice
