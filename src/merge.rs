@@ -8,7 +8,7 @@ use petgraph::graph::{Graph};
 use petgraph::graph::NodeIndex;
 use petgraph::visit::Dfs;
 use petgraph::{Undirected};
-use std::process::Command as ProcessCommand;
+use std::process::{Command, Stdio};
 use log::{debug, error, info, warn};
 use glob::glob;
 use crate::assess::BinQuality;
@@ -324,23 +324,28 @@ fn get_ani (
     ani_output: &PathBuf,
     threads: usize,
 ) -> Result<(), io::Error> {
-    let mut command = ProcessCommand::new("skani");
-    command.arg("triangle");
-    command.args(&inputbins);
-    command.arg("-E");
-    command.arg("-t");
-    command.arg(threads.to_string());
     
     if which::which("skani").is_err() {
         return Err(io::Error::new(io::ErrorKind::NotFound, "`skani` not found in PATH"));
     }
+
+    let output_file = File::create(ani_output)?;
+    let status = Command::new("skani")
+        .arg("triangle")
+        .args(&inputbins)
+        .arg("-E")
+        .arg("-t")
+        .arg(threads.to_string())
+        .stdout(Stdio::from(output_file))
+        .status()?;
     
-    let output = command.output()?;
-    
-    if !output.status.success() {
-        return Err(io::Error::new(io::ErrorKind::Other, "skani triangle failed"));
+    if !status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            "skani triangle failed",
+        ));
     }
-    std::fs::write(ani_output, output.stdout)?;
+
     Ok(())
 }
 
