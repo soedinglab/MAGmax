@@ -209,9 +209,19 @@ fn main() -> io::Result<()> {
         utility::get_sample_names(&bindir, &format)?
     };
     
+    let is_paired: bool = utility::check_paired_reads(&readdir);
+
     if !no_reassembly {
         let sample_count= bin_sample_map.values().collect::<HashSet<_>>().len();
         info!("{:?} bin files and {:?} samples found", binfiles.len(), sample_count);
+        if is_paired {
+            info!("Detected paired end \
+            reads in separate files as \
+            <sampleid>_1.fastq \
+            and <sampleid>_2.fastq.")
+        } else {
+            info!("Detected single-end reads as <sampleid>.fastq.")
+        }
     }
 
     // Obtain quality of bins
@@ -313,6 +323,7 @@ fn main() -> io::Result<()> {
                 completeness_cutoff,
                 contamination_cutoff,
                 no_reassembly,
+                is_paired,
                 id,
             )
             .map_err(|e| {
@@ -358,6 +369,7 @@ fn process_components(
     completeness_cutoff: f64,
     contamination_cutoff: f64,
     no_reassembly: bool,
+    is_paired: bool,
     id: usize,
 ) -> io::Result<()> {
     
@@ -402,15 +414,6 @@ fn process_components(
         return Ok(());
     }
 
-    let is_paired: bool = utility::check_paired_reads(&readdir);
-    if is_paired {
-        info!("Detected paired end \
-        reads in separate files as \
-        <sampleid>_1.fastq \
-        and <sampleid>_2.fastq.")
-    } else {
-        info!("Detected single-end reads as <sampleid>.fastq.")
-    }
     // eg. selected_binset_path = <bindir>/0_combined/
     let selected_binset_path = 
         resultdir.join(format!("{}_combined", id));
