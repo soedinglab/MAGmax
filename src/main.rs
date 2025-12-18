@@ -218,7 +218,7 @@ fn main() -> io::Result<()> {
     // eg: checkm2_outputpath = <parentpathof_bindir>/mags_90comp_95purity/checkm2_results/
     let checkm2_outputpath: PathBuf = resultdir
         .join("checkm2_results");
-    debug!("checkm2 output path {:?}",checkm2_outputpath);
+
     let checkm2_qualities = if let Some(qual_path) = &qual {
         // User have alredy provided CheckM2 quality file
         if qual_path.is_file() && fs::metadata(qual_path).map(|m| m.len() > 0).unwrap_or(false) {
@@ -279,7 +279,6 @@ fn main() -> io::Result<()> {
             return Ok(());
         }
     };
-    
     
     debug!("Genome graph was constructed");
     
@@ -392,7 +391,7 @@ fn process_components(
         {
             selected_bin = Some(bin_name);
         }
-        debug!("selected_bin {:?}", selected_bin);
+
         let _ = reassemble::select_bestqualitybin(
             selected_bin,
             bindir,

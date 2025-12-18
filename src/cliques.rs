@@ -2,9 +2,7 @@ use std::collections::{HashMap, HashSet};
 use petgraph::graph::{Graph};
 use petgraph::graph::NodeIndex;
 use petgraph::{Undirected};
-use log::{debug};
 use rayon::prelude::*;
-use std::thread;
 
 // Get clique clusters
 pub fn split_component_into_cliques(
@@ -21,9 +19,7 @@ pub fn split_component_into_cliques(
 
     const MAX_CLIQUE_CORE_SIZE: usize = 80;
     while remaining.len() > MAX_CLIQUE_CORE_SIZE {
-        if remaining.len() > 500{
-            debug!("Remaining nodes to process for cliques: {:?}", remaining);
-        }
+
         let core = 
             extract_core_chunk(&mut remaining, &adj, MAX_CLIQUE_CORE_SIZE);
         if core.len() <= 1 {
@@ -257,7 +253,7 @@ fn build_subgraph_for_ids(
         let idx = subgraph.add_node(id);
         node_map.insert(id, idx);
     }
-    debug!("Building subgraph for core of size {} using thread {:?}", core.len(), thread::current().id());
+
     for &id1 in core {
         if let Some(neighs) = adj.get(&id1) {
             for &id2 in neighs {

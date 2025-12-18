@@ -160,7 +160,6 @@ pub fn get_connected_samples(
     }
     let mut connected_samples: Vec<HashSet<String>> = vec![];
     for component in connected_components {
-        debug!("Processing component with {} nodes", component.len());
         if component.len() <=2 {
             let component_names = component
                 .into_iter()
@@ -179,7 +178,6 @@ pub fn get_connected_samples(
             }
         }
     }
-    debug!("connected samples completed");
     connected_samples
 }
 
@@ -220,12 +218,12 @@ pub fn drep_finalbins(
     threads: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ani_output: PathBuf = result_dir.join("ani_edges");
-    debug!("Starting drep_finalbins with ani_output: {:?}", ani_output);
+
     let finalbin_files: Vec<PathBuf> = glob(&format!("{}/*.fasta", result_dir.display()))
         .expect("Failed to read glob pattern")
         .filter_map(Result::ok)
         .collect();
-    debug!("Final bin files found: {:?}", &finalbin_files[..3]);
+
     if let Err(e) = get_ani(
         finalbin_files.iter().map(|p| p.to_string_lossy().into_owned()).collect(), 
         &ani_output,
@@ -239,7 +237,6 @@ pub fn drep_finalbins(
     let reader: BufReader<File> = io::BufReader::new(file);
 
     let mut bins_to_remove: HashSet<String> = HashSet::new();
-    debug!("before for loop in drep_finalbins");
 
     for line in reader.lines().skip(1) {
 
@@ -257,7 +254,7 @@ pub fn drep_finalbins(
             .unwrap_or_else(|| columns[1].to_string());
     
         let ani: f64 = columns[2].parse().expect("Failed to parse ANI value as float from column 3");
-        debug!("Comparing bins: {} and {} with ANI: {}", bin1, bin2, ani);
+
         // Skani gives results for 80% aligned pairs
         if ani >= ani_cutoff {
             if let (Some(q1), Some(q2)) = (bin_qualities.get(&bin1), bin_qualities.get(&bin2)) {
@@ -274,7 +271,6 @@ pub fn drep_finalbins(
                     &bin1
                 };
                 bins_to_remove.insert(worse_bin.clone());
-                debug!("bin to be removed {:?}",worse_bin);
             }
         }
     }
@@ -335,7 +331,6 @@ fn get_ani (
     command.arg("-t");
     command.arg(threads.to_string());
     
-    debug!("Entering skani run");
     if which::which("skani").is_err() {
         return Err(io::Error::new(io::ErrorKind::NotFound, "`skani` not found in PATH"));
     }
@@ -343,7 +338,6 @@ fn get_ani (
     let output = command.output()?;
     
     if !output.status.success() {
-        debug!("skani stderr: {}", String::from_utf8_lossy(&output.stderr));
         return Err(io::Error::new(io::ErrorKind::Other, "skani triangle failed"));
     }
     std::fs::write(ani_output, output.stdout)?;
