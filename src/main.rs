@@ -51,19 +51,19 @@ struct Cli {
 
     /// Average Nucleotide Identity cutoff
     #[arg(short = 'i', long = "ani", default_value_t = 99.0, help = "ANI for clustering bins (%)")]
-    ani: f64,
+    ani: f32,
 
     /// Completeness
     #[arg(short = 'c', long = "completeness", default_value_t = 50.0, help = "Minimum completeness of bins (%)")]
-    completeness_cutoff: f64,
+    completeness_cutoff: f32,
 
     /// Purity
     #[arg(short = 'p', long = "purity", default_value_t = 95.0, help = "Mininum purity (1- contamination) of bins (%)")]
-    purity_cutoff: f64,
+    purity_cutoff: f32,
     
     /// Alignment fraction covered
     #[arg(short = 'a', long = "alignedfrac", default_value_t = 0.0, help = "Mininum aligned fraction of (both reference and query) genomes covered in the ANI calculation")]
-    alignedfrac: f64,
+    alignedfrac: f32,
 
     /// Bin file extension
     #[arg(short = 'f', long = "format", default_value = "fasta", help = "Bin file extension")]
@@ -280,9 +280,9 @@ fn main() -> io::Result<()> {
     
     debug!("Bin qualities length before reassembly: {}", bin_qualities.len());
     
-    let (graph, ani_details, id_to_name) = match merge::calc_ani(&bindir, &bin_qualities, &format, anifile, ani_cutoff, contamination_cutoff, alignedfrac, threads) {
-        Ok((graph, ani_details, id_to_name)) => {
-            (graph, ani_details, id_to_name)
+    let (graph, ani_details, id_to_name, af_ref, af_query) = match merge::calc_ani(&bindir, &bin_qualities, &format, anifile, ani_cutoff, contamination_cutoff, alignedfrac, threads) {
+        Ok((graph, ani_details, id_to_name, af_ref, af_query)) => {
+            (graph, ani_details, id_to_name, af_ref, af_query)
         },
         Err(e) => {
             error!("Error calculating ANI: {}", e);
@@ -293,8 +293,8 @@ fn main() -> io::Result<()> {
     debug!("Genome graph was constructed");
     
     // Cluster bins based on ANI
-    let connected_bins: Vec<HashSet<String>> = merge::get_connected_samples(&graph, &ani_details, ani_cutoff, &id_to_name);
-    
+    let connected_bins: Vec<HashSet<String>> = merge::get_connected_samples(&graph, &ani_details, ani_cutoff, &id_to_name, alignedfrac, &af_ref, &af_query);
+
     debug!("Connected component was constructed");
     
     // Collect completeness and purity of merged and reassembled bins
@@ -347,7 +347,18 @@ fn main() -> io::Result<()> {
 
     debug!("before final dereplication");
     // Final dereplication using skani
-    let _ = merge::drep_finalbins(&resultdir, &bin_qualities, ani_cutoff, threads);
+    let _ = merge::drep_finalbins(
+        &resultdir,
+        &bin_qualities,
+        &ani_details,
+        &id_to_name,
+        &af_ref,
+        &af_query,
+        ani_cutoff,
+        alignedfrac,
+        threads,
+        no_reassembly,
+    );
        
     info!("MAGmax is successfully completed!");  
 
@@ -366,8 +377,8 @@ fn process_components(
     bin_qualities: &HashMap<String, BinQuality>,
     merged_bin_quality: &Arc<Mutex<HashMap<String, BinQuality>>>,
     assembler: &String,
-    completeness_cutoff: f64,
-    contamination_cutoff: f64,
+    completeness_cutoff: f32,
+    contamination_cutoff: f32,
     no_reassembly: bool,
     is_paired: bool,
     id: usize,
@@ -389,7 +400,7 @@ fn process_components(
         }
         return Ok(());
     }
-    
+    debug!("Processing component ID: {}, bins: {:?}", id, component);
     // Check if the cluster has already a high-quality bin (>90% comp, <5% cont)
     if assess::check_high_quality_bin(&component, &bin_qualities, bindir, resultdir, &format) {
         return Ok(());

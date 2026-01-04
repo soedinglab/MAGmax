@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use log::debug;
 use petgraph::graph::{Graph};
 use petgraph::graph::NodeIndex;
 use petgraph::{Undirected};
@@ -7,11 +8,14 @@ use rayon::prelude::*;
 // Get clique clusters
 pub fn split_component_into_cliques(
     component: HashSet<u32>,
-    ani_details: &HashMap<(u32, u32), f64>,
-    ani_cutoff: f64,
+    ani_details: &HashMap<(u32, u32), f32>,
+    ani_cutoff: f32,
+    aligned_frac: f32,
+    af_ref: &HashMap<(u32, u32), f32>,
+    af_query: &HashMap<(u32, u32), f32>,
 ) -> Vec<HashSet<u32>> {
 
-    let adj = build_adj(&component, ani_details, ani_cutoff);
+    let adj = build_adj(&component, ani_details, ani_cutoff, aligned_frac, af_ref, af_query);
 
     let mut remaining = component.clone();
     let mut subclusters: Vec<HashSet<u32>> = Vec::new();
@@ -101,8 +105,8 @@ pub fn split_component_into_cliques(
             }
         }
     }
-
-    let subclusters = connect_singletons_to_cliques(subclusters.clone(), ani_details, ani_cutoff);
+    debug!("subclusters before connecting: {:?}", subclusters.clone());
+    let subclusters = connect_singletons_to_cliques(subclusters.clone(), ani_details, ani_cutoff, aligned_frac, af_ref, af_query);
     
     subclusters
 }
@@ -163,8 +167,11 @@ fn bron_kerbosch(
 
 fn build_adj(
     component: &HashSet<u32>,
-    ani_details: &HashMap<(u32, u32), f64>,
-    ani_cutoff: f64,
+    ani_details: &HashMap<(u32, u32), f32>,
+    ani_cutoff: f32,
+    aligned_frac: f32,
+    af_ref: &HashMap<(u32, u32), f32>,
+    af_query: &HashMap<(u32, u32), f32>,
 ) -> HashMap<u32, HashSet<u32>> {
     let mut adj: HashMap<u32, HashSet<u32>> = HashMap::new();
 
@@ -181,7 +188,9 @@ fn build_adj(
             let key = if id1 <= id2 { (id1, id2) } else { (id2, id1) };
 
             if let Some(&ani) = ani_details.get(&key) {
-                if ani >= ani_cutoff {
+                if ani >= ani_cutoff
+                    && af_ref.get(&key).unwrap_or(&0.0) >= &aligned_frac
+                    && af_query.get(&key).unwrap_or(&0.0) >= &aligned_frac  {
                     adj.get_mut(&id1).unwrap().insert(id2);
                     adj.get_mut(&id2).unwrap().insert(id1);
                 }
@@ -271,8 +280,11 @@ fn build_subgraph_for_ids(
 
 fn connect_singletons_to_cliques(
     clusters: Vec<HashSet<u32>>,
-    ani_details: &HashMap<(u32, u32), f64>,
-    ani_cutoff: f64,
+    ani_details: &HashMap<(u32, u32), f32>,
+    ani_cutoff: f32,
+    aligned_frac: f32,
+    af_ref: &HashMap<(u32, u32), f32>,
+    af_query: &HashMap<(u32, u32), f32>
 ) -> Vec<HashSet<u32>> {
 
     // Split into multi-node cliques & singleton nodes
@@ -300,8 +312,10 @@ fn connect_singletons_to_cliques(
                 let (a, b) = if node <= member { (node, member) } else { (member, node) };
 
                 match ani_details.get(&(a, b)) {
-                    Some(&ani) if ani >= ani_cutoff => { /* ok */ }
-                    _ => {
+                    Some(&ani) if ani >= ani_cutoff 
+                        && af_ref.get(&(a, b)).unwrap_or(&0.0) >= &aligned_frac
+                        && af_query.get(&(a, b)).unwrap_or(&0.0) >= &aligned_frac => { /* ok */ }
+                        _ => {
                         all_ok = false;
                         break;
                     }
