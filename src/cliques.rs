@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use log::debug;
 use petgraph::graph::{Graph};
 use petgraph::graph::NodeIndex;
 use petgraph::{Undirected};
@@ -105,7 +104,7 @@ pub fn split_component_into_cliques(
             }
         }
     }
-    debug!("subclusters before connecting: {:?}", subclusters.clone());
+
     let subclusters = connect_singletons_to_cliques(subclusters.clone(), ani_details, ani_cutoff, aligned_frac, af_ref, af_query);
     
     subclusters

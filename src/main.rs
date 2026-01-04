@@ -280,7 +280,17 @@ fn main() -> io::Result<()> {
     
     debug!("Bin qualities length before reassembly: {}", bin_qualities.len());
     
-    let (graph, ani_details, id_to_name, af_ref, af_query) = match merge::calc_ani(&bindir, &bin_qualities, &format, anifile, ani_cutoff, contamination_cutoff, alignedfrac, threads) {
+    let (graph, ani_details, id_to_name, af_ref, af_query) = 
+        match merge::calc_ani(
+            &bindir,
+            &bin_qualities,
+            &format,
+            anifile,
+            ani_cutoff,
+            contamination_cutoff,
+            alignedfrac,
+            threads
+        ) {
         Ok((graph, ani_details, id_to_name, af_ref, af_query)) => {
             (graph, ani_details, id_to_name, af_ref, af_query)
         },
@@ -290,12 +300,16 @@ fn main() -> io::Result<()> {
         }
     };
     
-    debug!("Genome graph was constructed");
-    
     // Cluster bins based on ANI
-    let connected_bins: Vec<HashSet<String>> = merge::get_connected_samples(&graph, &ani_details, ani_cutoff, &id_to_name, alignedfrac, &af_ref, &af_query);
-
-    debug!("Connected component was constructed");
+    let connected_bins: Vec<HashSet<String>> = merge::get_connected_samples(
+        &graph,
+        &ani_details,
+        ani_cutoff,
+        &id_to_name,
+        alignedfrac,
+        &af_ref,
+        &af_query
+    );
     
     // Collect completeness and purity of merged and reassembled bins
     let merged_bin_qualities: Arc<Mutex<HashMap<String, BinQuality>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -345,7 +359,6 @@ fn main() -> io::Result<()> {
     
     }
 
-    debug!("before final dereplication");
     // Final dereplication using skani
     let _ = merge::drep_finalbins(
         &resultdir,

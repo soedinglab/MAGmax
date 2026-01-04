@@ -284,8 +284,6 @@ pub fn drep_finalbins(
         }
     } else {
 
-        debug!("Number of final bins to dereplicate: {:?}", finalbin_files);
-
         let ani_output: PathBuf = result_dir.join("ani_edges");
 
         if let Err(e) = get_ani(
@@ -378,7 +376,7 @@ fn get_ani (
     if which::which("skani").is_err() {
         return Err(io::Error::new(io::ErrorKind::NotFound, "`skani` not found in PATH"));
     }
-    debug!("Running skani triangle on {:?} bins", inputbins);
+
     let output_file = File::create(ani_output)?;
     let status = Command::new("skani")
         .arg("triangle")
