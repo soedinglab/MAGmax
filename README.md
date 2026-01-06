@@ -71,34 +71,38 @@ Option 3: Build from source
 
     
 ## Options
-        -b, --bindir <BINDIR>
-                Directory containing fasta files of bins
-        -r, --readdir <READDIR>
-                Directory containing read files
-        -m, --mapdir <MAPDIR>
-                Directory containing mapids files
-        -i, --ani <ANI>
-                ANI for clustering bins (%) [default: 99]
-        -c, --completeness <COMPLETENESS_CUTOFF>
-                Minimum completeness of bins (%) [default: 50]
-        -p, --purity <PURITY_CUTOFF>
-                Mininum purity (1- contamination) of bins (%) [default: 95]
-        -f, --format <FORMAT>
-                Bin file extension [default: fasta]
-        -t, --threads <THREADS>
-                Number of threads to use [default: 8]
-            --no-reassembly
-                Perform dereplication without bin merging and reassembly
-            --split
-                Split clusters into sample-wise bins before processing
-        -q, --qual <QUAL>
-                Quality file produced by CheckM2 (quality_report.tsv)
-            --assembler <ASSEMBLER>
-                Assembler choice for reassembly step (spades|megahit), spades is recommended [default: spades]
-        -h, --help
-                Print help
-        -V, --version
-                Print version
+    -b, --bindir <BINDIR>
+            Directory containing fasta files of bins
+    -r, --readdir <READDIR>
+            Directory containing read files
+    -m, --mapdir <MAPDIR>
+            Directory containing mapids files
+    -i, --ani <ANI>
+            ANI for clustering bins (%) [default: 99]
+    -c, --completeness <COMPLETENESS_CUTOFF>
+            Minimum completeness of bins (%) [default: 50]
+    -p, --purity <PURITY_CUTOFF>
+            Mininum purity (1- contamination) of bins (%) [default: 95]
+    -a, --alignedfrac <ALIGNEDFRAC>
+            Mininum aligned fraction of (both reference and query) genomes covered in the ANI calculation [default: 0]
+    -f, --format <FORMAT>
+            Bin file extension [default: fasta]
+    -t, --threads <THREADS>
+            Number of threads to use [default: 8]
+        --no-reassembly
+            Perform dereplication without bin merging and reassembly
+        --split
+            Split clusters into sample-wise bins before processing
+    -q, --qual <QUAL>
+            Quality file produced by CheckM2 (quality_report.tsv)
+        --anifile <ANIFILE>
+            ANI file produced by skani using command: skani triangle <bindir> -E -o <anifile>
+        --assembler <ASSEMBLER>
+            Assembler choice for reassembly step (spades|megahit), spades is recommended [default: spades]
+    -h, --help
+            Print help
+    -V, --version
+            Print version
 
 ## Test run using toy data
 This example test run demonstrates dereplication of bins using the provided toy dataset. In the `test/bins` directory, example bins generated with MetaBAT2 are given. In the `test/reads` directory, paired-end read files for two samples are given and in the `test/mapids` directory, mapid files mapping reads to contigs for each sample are given. Precomputed CheckM2 quality scores for the input bins are given in the `test/quality_report.tsv`. Run the following command to execute the test:
@@ -147,6 +151,9 @@ To fix, use the below bash command
 2. If input bins are not separated by sample IDs (e.g., when using MetaBAT2 or COMEBin on concatenated contigs), use the `--split` option to let MAGmax automatically separate bins by sample ID.
 
 3. We recommend Spades for reassembly which produces bins with higher purity than bins assembled using Megahit.
+
+
+MAGmax is stricter than Galah in dereplicating bins and exhibits similar computational efficiency on large dataset. For more details, see `magmax_vs_galah.md`.
 
 ## Citation
 Arangasamy Yazhini, Johannes Söding, Enhancing genome recovery across metagenomic samples using MAGmax, Bioinformatics (2025), https://doi.org/10.1093/bioinformatics/btaf538.

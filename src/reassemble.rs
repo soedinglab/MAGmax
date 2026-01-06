@@ -22,8 +22,8 @@ pub fn run_reassembly(
     component: &HashSet<String>,
     bin_qualities: &HashMap<String, BinQuality>,
     merged_bin_quality: &Arc<Mutex<HashMap<String, BinQuality>>>,
-    completeness_cutoff: f64,
-    contamination_cutoff: f64,
+    completeness_cutoff: f32,
+    contamination_cutoff: f32,
     format: &String
 ) {
     
@@ -49,8 +49,8 @@ pub fn run_reassembly(
     };
 
     let mut selected_bin: Option<String> = None;
-    let mut selected_completeness: Option<f64> = None;
-    let mut selected_contamination: Option<f64> = None;
+    let mut selected_completeness: Option<f32> = None;
+    let mut selected_contamination: Option<f32> = None;
 
     // Find the best bin based on quality score within the cluster
     // if let Some((bin_name, completeness, contamination)) = component
@@ -272,8 +272,8 @@ fn filterscaffold(input_file: &PathBuf) -> io::Result<()> {
 pub fn find_bestqualitybin(
     component: &HashSet<String>,
     bin_qualities: &HashMap<String, BinQuality>,
-    completeness_cutoff: f64,
-) -> Option<(String, f64, f64)> {
+    completeness_cutoff: f32,
+) -> Option<(String, f32, f32)> {
     component
     .iter()
     .filter_map(|bin| {
@@ -306,8 +306,12 @@ pub fn select_bestqualitybin(
 
     if let Some(bin_id) = selected_bin {
         let bin_path = bindir.join(format!("{}.{}", bin_id, format));
-        if let Err(e) = fs::copy(bin_path, outputpath.join(format!("{}.fasta", bin_id))) {
-            error!("Failed to copy {}: {}", bin_id, e);
+        let output_file = outputpath.join(format!("{}.fasta", bin_id));
+        
+        if !output_file.exists() {
+            if let Err(e) = fs::copy(&bin_path, &output_file) {
+                error!("Failed to copy {}: {}", bin_id, e);
+            }
         }
     }
     Ok(())
