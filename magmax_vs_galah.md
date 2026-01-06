@@ -1,4 +1,4 @@
-### Comparison of MAGmax with Galah for genome dereplication
+### Comparison of MAGmax and Galah for genome dereplication
 
 Galah is a fast dereplication tool and provides option to use CheckM2 quality scores similar to MAGmax. Here, we compare galah and magmax to evalute their performance.
 
@@ -69,7 +69,7 @@ Only genomic pairs *0-4* and *6-8* share ANI < 99.9%, while all other pairs shar
 **MAGmax result:** 1 genome {indexed 4} *(without reassembly mode)*
 
 
-#### Why difference in the number of dereplicated bins?
+#### Why do the numbers of dereplicated bins differ?
 
 1. Both tools, form the same precluster with all 9 genomes in one connected component. 
 
