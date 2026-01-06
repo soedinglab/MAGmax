@@ -84,10 +84,13 @@ Only genomic pairs *0-4* and *6-8* share ANI < 99.9%, while all other pairs shar
 
 
 ### Computational efficiency
+
 Runtime and peak memory usage of magmax and galah were measured on three datasets with different numbers of input genomes (9, 500, and 20K).
-For each dataset, the best performance of the two tools was compared based on three replicate runs under the same CPU and memory limitsß.
+For each dataset, the best performance of the two tools was compared based on three replicate runs under the same CPU and memory limits.
 
 Galah runs faster on the small dataset, whereas no significant differences in runtime or peak memory usage were observed between the two tools on larger datasets.
 
 MAGmax also supports using a precomputed ANI file as direct input, reducing the runtime for the 20K dataset from 4,522 seconds to 357 seconds (~12× speedup). This enables iterative dereplication across different cutoffs at a much faster pace.
+
+<img width="7119" height="2930" alt="computational_efficiency" src="https://github.com/user-attachments/assets/cc9c8b46-fb24-442a-9ab8-4c38ff9759c1" />
 
