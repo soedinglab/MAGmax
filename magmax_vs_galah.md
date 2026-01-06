@@ -80,7 +80,7 @@ Only genomic pairs *0-4* and *6-8* share ANI < 99.9%, while all other pairs shar
 4. MAGmax considers **all pairs with 99.9% ANI** and chooses the best quality genome between the pairs, whereas Galah ingores many such pairs.
 
 
-<span style="color:blue"> **Overall, MAGmax algorithmically stricter than Galah and ensures that always best quality genome in the genomic pair is selected as representative.**</span>
+<span style="color:blue"> **Overall, MAGmax algorithmically stricter than Galah and ensures that always the best quality genome ß genomic pair is selected as a representative.**</span>
 
 
 ### Computational efficiency
