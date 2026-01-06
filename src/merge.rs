@@ -1,5 +1,4 @@
 use bio::io::fasta;
-use serde::de;
 use std::io::{BufWriter, Write};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -17,9 +16,9 @@ use crate::cliques;
 
 /// Compute all-vs-all ANI among bins
 pub fn calc_ani(
-    bins: &PathBuf,
+    bins: &Path,
     bin_qualities: &HashMap<String, BinQuality>,
-    format: &String,
+    format: &str,
     anifile: Option<PathBuf>,
     ani_cutoff: f32,
     contamination_cutoff: f32,
@@ -53,8 +52,8 @@ pub fn calc_ani(
                 error!("No fasta files found in {:?}", bins);
                 return Err(io::Error::new(io::ErrorKind::NotFound, "No fasta files found"));
             }
-
-            let _ = get_ani(bin_files, &ani_output, threads)?;
+            info!("Calculating ANI between bins using skani ...");
+            get_ani(bin_files, &ani_output, threads)?;
         }
     } else {
         ani_output = bins.join("ani_edges");
@@ -68,8 +67,8 @@ pub fn calc_ani(
             error!("No fasta files found in {:?}", bins);
             return Err(io::Error::new(io::ErrorKind::NotFound, "No fasta files found"));
         }
-        
-        let _ = get_ani(bin_files, &ani_output, threads)?;
+        info!("Calculating ANI between bins using skani ...");
+        get_ani(bin_files, &ani_output, threads)?;
     }
     // let mut bin_name_to_node: HashMap<String, prelude::NodeIndex> = HashMap::new();
     let mut bin_name_to_id: HashMap<String, u32> = HashMap::new();
@@ -97,9 +96,11 @@ pub fn calc_ani(
     // Create a graph by add edge when ANI > ANI_threshold
     // When file is empty, no edge is formed and all nodes will be Singleton clusters.   
     for line in reader.lines().skip(1) {
+        
         let line = line?;
         let columns: Vec<&str> = line.split('\t').collect();
-        if columns.len() < 3 {
+
+        if columns.len() < 5 {
             continue;
         }
     
@@ -113,10 +114,10 @@ pub fn calc_ani(
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| columns[1].to_string());
 
-        let id1 = get_or_assign_id(
-            &bin1, &mut bin_name_to_id, &mut id_to_name);
-        let id2 = get_or_assign_id(
-            &bin2, &mut bin_name_to_id, &mut id_to_name);
+        let (Some(&id1), Some(&id2)) = 
+            (bin_name_to_id.get(&bin1), bin_name_to_id.get(&bin2)) else {
+            continue;
+        };
     
         let ani: f32 = columns[2].parse().unwrap_or(0.0);
         let alignfrac_ref: f32 = columns[3].parse().unwrap_or(0.0);
@@ -129,8 +130,8 @@ pub fn calc_ani(
 
         // Skani reports pairs only if ANI is >= 80%
         if ani < ani_cutoff
-            && alignfrac_ref < alignedfrac
-            && alignfrac_que < alignedfrac {
+            || alignfrac_ref < alignedfrac
+            || alignfrac_que < alignedfrac {
             continue;
         }
     
@@ -166,14 +167,14 @@ pub fn get_connected_samples(
 
             while let Some(nx) = dfs.next(&graph) {
                 if visited.insert(nx) {
-                    let node_name = graph[nx].clone();
-                    component.insert(node_name);
+                    let node_id = graph[nx];
+                    component.insert(node_id);
                 }
             }
             connected_components.push(component);
         }
     }
-    let mut connected_samples: Vec<HashSet<String>> = vec![];
+    let mut connected_samples: Vec<HashSet<String>> = Vec::new();
     for component in connected_components {
         if component.len() <=2 {
             let component_names = component
@@ -201,25 +202,27 @@ pub fn combine_fastabins(
     inputdir: &Path,
     bin_samplenames: &HashSet<String>,
     combined_bins: &Path,
-    format: &String,
+    format: &str,
 ) -> io::Result<()> {
     // Combine bins fasta into a single file
-    let mut output_writer = File::create(
-        combined_bins
-        .join("combined.fasta"))?;
+    
+    let out = File::create(combined_bins.join("combined.fasta"))?;
+    let mut output_writer = BufWriter::new(out);
+
     for bin_samplename in bin_samplenames {
         let bin_file_path = inputdir.join(format!("{}.{}", bin_samplename, format));
-        if bin_file_path.exists() {
-            let bin_file = File::open(&bin_file_path)?;
-            let reader = fasta::Reader::new(bin_file);
+        if !bin_file_path.exists() {
+            warn!("Warning: File for bin '{}' does not exist at {:?}", bin_samplename, bin_file_path);
+            continue;
+        }
+        
+        let bin_file = File::open(&bin_file_path)?;
+        let reader = fasta::Reader::new(bin_file);
 
-            for record in reader.records() {
-                let record = record?;  // Get the record
-                writeln!(output_writer, ">{}", format!("{}",record.id()))?;
-                writeln!(output_writer, "{}", String::from_utf8_lossy(record.seq()))?;
-            }
-        } else {
-            error!("Warning: File for bin '{}' does not exist at {:?}", bin_samplename, bin_file_path);
+        for record in reader.records() {
+            let record = record?;  // Get the record
+            writeln!(output_writer, ">{}", record.id())?;
+            writeln!(output_writer, "{}", String::from_utf8_lossy(record.seq()))?;
         }
     }
     Ok(())
@@ -227,7 +230,7 @@ pub fn combine_fastabins(
 
 /// Dereplicate final bins to remove any redundant bins
 pub fn drep_finalbins(
-    result_dir: &PathBuf,
+    result_dir: &Path,
     bin_qualities: &HashMap<String, BinQuality>,
     ani_details: &HashMap<(u32, u32), f32>,
     id_to_name: &[String],
@@ -268,8 +271,15 @@ pub fn drep_finalbins(
                 continue;
             }
 
-            let af_r = af_ref.get(&pair).copied().unwrap_or(0.0);
-            let af_q = af_query.get(&pair).copied().unwrap_or(0.0);
+            let af_r = af_ref.get(&pair)
+                .or_else(|| af_ref.get(&(id2, id1)))
+                .copied()
+                .unwrap_or(0.0);
+
+            let af_q = af_query.get(&pair)
+                .or_else(|| af_query.get(&(id2, id1)))
+                .copied()
+                .unwrap_or(0.0);
 
             if af_r < alignedfrac || af_q < alignedfrac {
                 continue;
@@ -328,7 +338,7 @@ pub fn drep_finalbins(
         }
         if !cfg!(debug_assertions) {
             if let Err(e) = remove_file(&ani_output) {
-                warn!("Failed to delete folder {:?}: {}", ani_output, e);
+                warn!("Failed to delete file {:?}: {}", ani_output, e);
         }
     }
     }
@@ -385,6 +395,7 @@ fn get_ani (
         .arg("-t")
         .arg(threads.to_string())
         .stdout(Stdio::from(output_file))
+        .stderr(Stdio::null())
         .status()?;
     
     if !status.success() {
@@ -406,14 +417,19 @@ fn get_or_assign_id(
     if let Some(&id) = map.get(name) {
         return id;
     }
-    let id = names.len() as u32;
+    let id = u32::try_from(names.len()).expect("too many names");
     map.insert(name.to_owned(), id);
     names.push(name.to_owned());
     id
 }
 
 // Get poorer quality bin
-fn find_worsebin<'a>(bin1: &'a str, bin2: &'a str, q1: &BinQuality, q2: &BinQuality) -> &'a str {
+fn find_worsebin<'a>(
+    bin1: &'a str,
+    bin2: &'a str,
+    q1: &BinQuality,
+    q2: &BinQuality,
+) -> &'a str {
     let score1 = q1.completeness - (5.0 * q1.contamination);
     let score2 = q2.completeness - (5.0 * q2.contamination);
 

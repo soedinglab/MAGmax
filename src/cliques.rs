@@ -16,23 +16,25 @@ pub fn split_component_into_cliques(
 
     let adj = build_adj(&component, ani_details, ani_cutoff, aligned_frac, af_ref, af_query);
 
-    let mut remaining = component.clone();
+    let mut remaining = component;
     let mut subclusters: Vec<HashSet<u32>> = Vec::new();
     let mut cores: Vec<HashSet<u32>> = Vec::new();
 
     const MAX_CLIQUE_CORE_SIZE: usize = 80;
+
+    // Split large components into cores to improve performance
+    // It might miss some cliques spanning multiple cores
+    // but since we compare final clusters later, it should 
+    // not miss genomic pairs > ANI threshold and not influence the final results
     while remaining.len() > MAX_CLIQUE_CORE_SIZE {
 
         let core = 
             extract_core_chunk(&mut remaining, &adj, MAX_CLIQUE_CORE_SIZE);
         if core.len() <= 1 {
             // treat as singleton(s)
-            for id in core {
-                let mut s = HashSet::new();
-                s.insert(id);
-                subclusters.push(s);
-            }
+            subclusters.extend(core.into_iter().map(|id| HashSet::from([id])));
             continue;
+
         }
         cores.push(core);
     }
@@ -71,26 +73,14 @@ pub fn split_component_into_cliques(
             .into_iter()
             .map(|c| c.into_iter().collect::<HashSet<u32>>()),
         );
-        // let subgraph = build_subgraph_for_ids(&core, &adj);
-        // let mut r: Vec<NodeIndex> = Vec::new();
-        // let mut p: Vec<NodeIndex> = subgraph.node_indices().collect();
-        // let mut x: Vec<NodeIndex> = Vec::new();
-        // let mut cliques_vec: Vec<Vec<u32>> = Vec::new();
-
-        // bron_kerbosch(&subgraph, &mut r, &mut p, &mut x, &mut cliques_vec);
-
-        // for c in cliques_vec {
-        //     subclusters.push(c.into_iter().collect());
-        // }
     }
 
     if !remaining.is_empty() {
         if remaining.len() == 1 {
-            let mut s = HashSet::new();
-            s.insert(*remaining.iter().next().unwrap());
-            subclusters.push(s);
+            subclusters.push(HashSet::from([*remaining.iter().next().unwrap()]));
         } else {
-            let subgraph = build_subgraph_for_ids(&remaining, &adj);
+            let subgraph = 
+                build_subgraph_for_ids(&remaining, &adj);
 
             let mut r: Vec<NodeIndex> = Vec::new();
             let mut p: Vec<NodeIndex> = subgraph.node_indices().collect();
@@ -99,15 +89,23 @@ pub fn split_component_into_cliques(
 
             bron_kerbosch(&subgraph, &mut r, &mut p, &mut x, &mut cliques_vec);
 
-            for c in cliques_vec {
-                subclusters.push(c.into_iter().collect());
-            }
+            subclusters.extend(
+                cliques_vec
+                .into_iter()
+                .map(|c| c.into_iter().collect()));
         }
     }
 
-    let subclusters = connect_singletons_to_cliques(subclusters.clone(), ani_details, ani_cutoff, aligned_frac, af_ref, af_query);
+    let final_subclusters = connect_singletons_to_cliques(
+        subclusters,
+        ani_details,
+        ani_cutoff,
+        aligned_frac,
+        af_ref,
+        af_query
+    );
     
-    subclusters
+    final_subclusters
 }
 
 // Detect maximal cliques
@@ -185,14 +183,14 @@ fn build_adj(
             let id2 = ids[j];
 
             let key = if id1 <= id2 { (id1, id2) } else { (id2, id1) };
+            
+            let Some(&ani) = ani_details.get(&key) else { continue; };
+            let af_r = af_ref.get(&key).copied().unwrap_or(0.0);
+            let af_q = af_query.get(&key).copied().unwrap_or(0.0);
 
-            if let Some(&ani) = ani_details.get(&key) {
-                if ani >= ani_cutoff
-                    && af_ref.get(&key).unwrap_or(&0.0) >= &aligned_frac
-                    && af_query.get(&key).unwrap_or(&0.0) >= &aligned_frac  {
-                    adj.get_mut(&id1).unwrap().insert(id2);
-                    adj.get_mut(&id2).unwrap().insert(id1);
-                }
+            if ani >= ani_cutoff && af_r >= aligned_frac && af_q >= aligned_frac {
+                adj.get_mut(&id1).unwrap().insert(id2);
+                adj.get_mut(&id2).unwrap().insert(id1);
             }
         }
     }
@@ -208,17 +206,16 @@ fn extract_core_chunk(
     // Pick a seed: e.g. highest-degree node
     let &seed = remaining
         .iter()
-        .max_by_key(|id| adj.get(id).map_or(0, |neighs| neighs.len()))
+        .max_by_key(|id| adj.get(id)
+        .map_or(0, |neighs| neighs.len()))
         .expect("remaining non-empty");
 
     let mut core = HashSet::new();
     let mut frontier = vec![seed];
     core.insert(seed);
 
-    while core.len() < max_size {
-        if frontier.is_empty() {
-            break;
-        }
+    while core.len() < max_size && 
+        !frontier.is_empty() {
 
         let mut next_frontier = Vec::new();
 
@@ -266,9 +263,9 @@ fn build_subgraph_for_ids(
         if let Some(neighs) = adj.get(&id1) {
             for &id2 in neighs {
                 if id1 < id2 && core.contains(&id2) {
-                    if let (Some(&n1), Some(&n2)) = (node_map.get(&id1), node_map.get(&id2)) {
-                        subgraph.add_edge(n1, n2, ());
-                    }
+                    let n1 = node_map[&id1];
+                    let n2 = node_map[&id2];
+                    subgraph.add_edge(n1, n2, ());
                 }
             }
         }
@@ -292,7 +289,9 @@ fn connect_singletons_to_cliques(
 
     for cluster in clusters {
         if cluster.len() == 1 {
-            singletons.push(*cluster.iter().next().unwrap());
+            if let Some(&only) = cluster.iter().next() {
+                singletons.push(only);
+            }
         } else {
             cliques.push(cluster);
         }
@@ -307,17 +306,17 @@ fn connect_singletons_to_cliques(
         for (i, clique) in cliques.iter().enumerate() {
             let mut all_ok = true;
 
-            for &member in clique {
-                let (a, b) = if node <= member { (node, member) } else { (member, node) };
+            for &member in clique.iter() {
 
-                match ani_details.get(&(a, b)) {
-                    Some(&ani) if ani >= ani_cutoff 
-                        && af_ref.get(&(a, b)).unwrap_or(&0.0) >= &aligned_frac
-                        && af_query.get(&(a, b)).unwrap_or(&0.0) >= &aligned_frac => { /* ok */ }
-                        _ => {
-                        all_ok = false;
-                        break;
-                    }
+                let key = if node <= member { (node, member) } else { (member, node) };
+
+                let ani = ani_details.get(&key).copied().unwrap_or(0.0);
+                let af_r = af_ref.get(&key).copied().unwrap_or(0.0);
+                let af_q = af_query.get(&key).copied().unwrap_or(0.0);
+
+                if ani < ani_cutoff || af_r < aligned_frac || af_q < aligned_frac {
+                    all_ok = false;
+                    break;
                 }
             }
 
