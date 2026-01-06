@@ -203,12 +203,6 @@ fn main() -> io::Result<()> {
     }
 
     // Get sample list
-<<<<<<< HEAD
-    // let bin_sample_map: HashMap<String, String> = utility::get_sample_names(&bindir,&format)?;
-    // let sample_count= bin_sample_map.values().collect::<HashSet<_>>().len();
-    // info!("{:?} bin files and {:?} samples found", binfiles.len(), sample_count);
-=======
->>>>>>> parallel-cliques
     let bin_sample_map: HashMap<String, String> = if no_reassembly {
         HashMap::new()
     } else {
