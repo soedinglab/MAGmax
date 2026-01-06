@@ -154,7 +154,7 @@ To fix, use the below bash command
 3. We recommend Spades for reassembly which produces bins with higher purity than bins assembled using Megahit.
 
 
-MAGmax is stricter than Galah in dereplicating bins and exhibits similar computational efficiency on large dataset. For more details, see `magmax_vs_galah.md`.
+MAGmax is stricter than Galah in dereplicating bins and exhibits similar computational efficiency on large dataset. For more details, see [magmax_vs_galah.md](https://github.com/soedinglab/MAGmax/blob/main/magmax_vs_galah.md).
 
 ## Citation
 Arangasamy Yazhini, Johannes Söding, Enhancing genome recovery across metagenomic samples using MAGmax, Bioinformatics (2025), https://doi.org/10.1093/bioinformatics/btaf538.
