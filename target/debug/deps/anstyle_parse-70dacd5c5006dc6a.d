@@ -1,0 +1,9 @@
+/nfs/users/nfs_y/ya4/software/MAGmax/target/debug/deps/anstyle_parse-70dacd5c5006dc6a.d: /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-parse-0.2.7/src/lib.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-parse-0.2.7/src/params.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-parse-0.2.7/src/state/mod.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-parse-0.2.7/src/state/definitions.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-parse-0.2.7/src/state/table.rs
+
+/nfs/users/nfs_y/ya4/software/MAGmax/target/debug/deps/libanstyle_parse-70dacd5c5006dc6a.rmeta: /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-parse-0.2.7/src/lib.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-parse-0.2.7/src/params.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-parse-0.2.7/src/state/mod.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-parse-0.2.7/src/state/definitions.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-parse-0.2.7/src/state/table.rs
+
+/nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-parse-0.2.7/src/lib.rs:
+/nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-parse-0.2.7/src/params.rs:
+/nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-parse-0.2.7/src/state/mod.rs:
+/nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-parse-0.2.7/src/state/definitions.rs:
+/nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-parse-0.2.7/src/state/table.rs:

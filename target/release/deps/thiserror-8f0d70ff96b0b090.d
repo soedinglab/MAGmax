@@ -1,0 +1,14 @@
+/nfs/users/nfs_y/ya4/software/MAGmax/target/release/deps/thiserror-8f0d70ff96b0b090.d: /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/lib.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/aserror.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/display.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/var.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/private.rs /nfs/users/nfs_y/ya4/software/MAGmax/target/release/build/thiserror-17ecf9c0462e2ce9/out/private.rs
+
+/nfs/users/nfs_y/ya4/software/MAGmax/target/release/deps/libthiserror-8f0d70ff96b0b090.rlib: /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/lib.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/aserror.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/display.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/var.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/private.rs /nfs/users/nfs_y/ya4/software/MAGmax/target/release/build/thiserror-17ecf9c0462e2ce9/out/private.rs
+
+/nfs/users/nfs_y/ya4/software/MAGmax/target/release/deps/libthiserror-8f0d70ff96b0b090.rmeta: /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/lib.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/aserror.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/display.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/var.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/private.rs /nfs/users/nfs_y/ya4/software/MAGmax/target/release/build/thiserror-17ecf9c0462e2ce9/out/private.rs
+
+/nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/lib.rs:
+/nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/aserror.rs:
+/nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/display.rs:
+/nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/var.rs:
+/nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.17/src/private.rs:
+/nfs/users/nfs_y/ya4/software/MAGmax/target/release/build/thiserror-17ecf9c0462e2ce9/out/private.rs:
+
+# env-dep:OUT_DIR=/nfs/users/nfs_y/ya4/software/MAGmax/target/release/build/thiserror-17ecf9c0462e2ce9/out

@@ -14,6 +14,7 @@ use readfetch::fetch_fastqreads;
 mod utility;
 mod assess;
 mod merge;
+mod mwids;
 mod cliques;
 mod readfetch;
 mod reassemble;
@@ -78,6 +79,10 @@ struct Cli {
         conflicts_with_all = ["readdir", "mapdir"])]
     no_reassembly: bool,
 
+     /// Disable reassembly step
+    #[arg(long = "sensitive", help = "Select representatives based on high connectivity")]
+    sensitive: bool,
+
     /// First split bins before merging (if provided, set to true)
     #[arg(long = "split", help = "Split clusters into sample-wise bins before processing")]
     split: bool,
@@ -113,7 +118,8 @@ fn main() -> io::Result<()> {
     let assembler: String = cli.assembler;
     let qual = cli.qual;
     let anifile = cli.anifile;
-    let no_reassembly = cli.no_reassembly;
+    let mut no_reassembly = cli.no_reassembly;
+    let sensitive = cli.sensitive;
     let parentdir = bindir.parent().map(PathBuf::from).unwrap_or_else(|| bindir.clone());
     
     info!("Starting MAGmax with parameters:");
@@ -141,6 +147,10 @@ fn main() -> io::Result<()> {
         info!("  🔸 MAGmax runs dereplication of input bins without bin merging and reassembly");
     }
 
+    if sensitive {
+        no_reassembly = true;
+        info!("  🔸 MAGmax selects representatives based on high connectivity and run in no-reassembly mode");
+    }
     let binfiles = utility::get_binfiles(&bindir,&format)?;
     if binfiles.is_empty() {
         return Err(io::Error::new(
@@ -280,7 +290,7 @@ fn main() -> io::Result<()> {
     
     debug!("Bin qualities length before reassembly: {}", bin_qualities.len());
     
-    let (graph, ani_details, id_to_name, af_ref, af_query) = 
+    let (graph, ani_details, id_to_name, id_to_node, af_ref, af_query) = 
         match merge::calc_ani(
             &bindir,
             &bin_qualities,
@@ -291,8 +301,8 @@ fn main() -> io::Result<()> {
             alignedfrac,
             threads
         ) {
-        Ok((graph, ani_details, id_to_name, af_ref, af_query)) => {
-            (graph, ani_details, id_to_name, af_ref, af_query)
+        Ok((graph, ani_details, id_to_name, id_to_node, af_ref, af_query)) => {
+            (graph, ani_details, id_to_name, id_to_node, af_ref, af_query)
         },
         Err(e) => {
             error!("Error calculating ANI: {}", e);
@@ -300,8 +310,32 @@ fn main() -> io::Result<()> {
         }
     };
     
+
+    if sensitive {
+        info!("Selecting representatives based on high connectivity");
+        let representative_bins = mwids::select_highconnectivity_bins(
+            &graph,
+            &ani_details,
+            ani_cutoff,
+            &id_to_name,
+            &id_to_node,
+            &bin_qualities,
+            completeness_cutoff,
+            contamination_cutoff,
+        );
+        for bin in representative_bins {
+            let bin_path = bindir.join(format!("{}.{}", bin, format));
+            let final_path = resultdir.join(format!("{}.fasta", bin));
+            if let Err(e) = fs::copy(&bin_path, &final_path) {
+                error!("Failed to copy from {:?} to {:?}: {}", bin_path, final_path, e);
+            }
+        }
+        info!("MAGmax is successfully completed!");  
+        return Ok(());
+    }
+
     // Cluster bins based on ANI
-    let connected_bins: Vec<HashSet<String>> = merge::get_connected_samples(
+    let connected_bins = merge::get_connected_samples(
         &graph,
         &ani_details,
         ani_cutoff,
@@ -314,7 +348,8 @@ fn main() -> io::Result<()> {
     // Collect completeness and purity of merged and reassembled bins
     let merged_bin_qualities: Arc<Mutex<HashMap<String, BinQuality>>> = Arc::new(Mutex::new(HashMap::new()));
 
-    pool.install(|| {
+    if !no_reassembly {
+        pool.install(|| {
         connected_bins
         .par_iter()
         .enumerate()
@@ -323,7 +358,7 @@ fn main() -> io::Result<()> {
             stderr().flush().ok();
             // Process each connected component
             let merged_bin_quality = Arc::clone(&merged_bin_qualities);
-            process_components(
+            process_components_reassemble(
                 &component,
                 &bindir,
                 &mapdir,
@@ -346,8 +381,34 @@ fn main() -> io::Result<()> {
             })
         })
         .expect("Error during processing components");
-    });
-
+        });
+    } else {
+        pool.install(|| {
+        connected_bins
+        .par_iter()
+        .enumerate()
+        .try_for_each(|(id, component)| {
+            // Flush stderr once before processing starts
+            stderr().flush().ok();
+            // Process each connected component
+            process_components(
+                &component,
+                &bindir,
+                &resultdir,
+                &format,
+                &bin_qualities,
+                completeness_cutoff,
+                id,
+            )
+            .map_err(|e| {
+                error!("Error processing bin {:?}: {}", component, e);
+                e
+            })
+        })
+        .expect("Error during processing components");
+        });
+    }
+    
     if !no_reassembly {
         {
             let merged_bin_qualities = merged_bin_qualities.lock().unwrap();
@@ -378,8 +439,60 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
+
 /// Process cluster in parallel
 fn process_components(
+    component: &HashSet<String>,
+    bindir: &PathBuf,
+    resultdir: &PathBuf,
+    format: &String,
+    bin_qualities: &HashMap<String, BinQuality>,
+    completeness_cutoff: f32,
+    id: usize,
+) -> io::Result<()> {
+    
+    // eg: comp = {"binname_S1", "binname_S2"}
+
+    // Singleton cluster, save the bin in the output
+    if component.len() == 1 {
+        let binname = component.into_iter().next().expect("The component is empty.");
+        if let Some(quality) = bin_qualities.get(binname) {
+            if quality.completeness >= completeness_cutoff {
+                let bin_path = bindir.join(format!("{}.{}", binname, format));
+                let final_path = resultdir.join(format!("{}.fasta", binname));
+                if let Err(e) = fs::copy(&bin_path, &final_path) {
+                    error!("Failed to copy from {:?} to {:?}: {}", bin_path, final_path, e);
+                }
+            }
+        }
+        return Ok(());
+    }
+    debug!("Processing component ID: {}, bins: {:?}", id, component);
+    // Check if the cluster has already a high-quality bin (>90% comp, <5% cont)
+    if assess::check_high_quality_bin(&component, &bin_qualities, bindir, resultdir, &format) {
+        return Ok(());
+    } // edit here to select representative based on connectivity
+
+    // If no_reassembly is enabled, just select the best quality bin from each cluster
+    let mut selected_bin: Option<String> = None;
+    if let Some((bin_name, _, _)) =
+    reassemble::find_bestqualitybin(component, &bin_qualities, completeness_cutoff) // edit here to select representative based on connectivity
+    {
+        selected_bin = Some(bin_name);
+    }
+
+    let _ = reassemble::select_bestqualitybin(
+        selected_bin,
+        bindir,
+        resultdir,
+        format
+    ); // edit here to select representative based on connectivity
+
+    return Ok(());
+}
+
+/// Process cluster in parallel
+fn process_components_reassemble(
     component: &HashSet<String>,
     bindir: &PathBuf,
     mapdir: &PathBuf,
@@ -417,13 +530,13 @@ fn process_components(
     // Check if the cluster has already a high-quality bin (>90% comp, <5% cont)
     if assess::check_high_quality_bin(&component, &bin_qualities, bindir, resultdir, &format) {
         return Ok(());
-    }
+    } // edit here to select representative based on connectivity
 
     // If no_reassembly is enabled, just select the best quality bin from each cluster
     if no_reassembly {
         let mut selected_bin: Option<String> = None;
         if let Some((bin_name, _, _)) =
-        reassemble::find_bestqualitybin(component, &bin_qualities, completeness_cutoff)
+        reassemble::find_bestqualitybin(component, &bin_qualities, completeness_cutoff) // edit here to select representative based on connectivity
         {
             selected_bin = Some(bin_name);
         }
@@ -433,7 +546,7 @@ fn process_components(
             bindir,
             resultdir,
             format
-        );
+        ); // edit here to select representative based on connectivity
 
         return Ok(());
     }

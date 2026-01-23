@@ -1,0 +1,14 @@
+/nfs/users/nfs_y/ya4/software/MAGmax/target/debug/deps/serde-02069ef71b03c4ec.d: /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /nfs/users/nfs_y/ya4/software/MAGmax/target/debug/build/serde-93c5c631a3f85b85/out/private.rs
+
+/nfs/users/nfs_y/ya4/software/MAGmax/target/debug/deps/libserde-02069ef71b03c4ec.rlib: /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /nfs/users/nfs_y/ya4/software/MAGmax/target/debug/build/serde-93c5c631a3f85b85/out/private.rs
+
+/nfs/users/nfs_y/ya4/software/MAGmax/target/debug/deps/libserde-02069ef71b03c4ec.rmeta: /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /nfs/users/nfs_y/ya4/software/MAGmax/target/debug/build/serde-93c5c631a3f85b85/out/private.rs
+
+/nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/nfs/users/nfs_y/ya4/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/nfs/users/nfs_y/ya4/software/MAGmax/target/debug/build/serde-93c5c631a3f85b85/out/private.rs:
+
+# env-dep:OUT_DIR=/nfs/users/nfs_y/ya4/software/MAGmax/target/debug/build/serde-93c5c631a3f85b85/out

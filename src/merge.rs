@@ -28,6 +28,7 @@ pub fn calc_ani(
     petgraph::Undirected>, 
     HashMap<(u32, u32), f32>,
     Vec<String>,
+    HashMap<u32, NodeIndex>,
     HashMap<(u32, u32), f32>,
     HashMap<(u32, u32), f32>),
     io::Error> {
@@ -143,19 +144,14 @@ pub fn calc_ani(
 
     // Remove skani output file
     // remove_file(&ani_output).ok();
-   Ok((graph, ani_details, id_to_name, af_ref, af_query))
+   Ok((graph, ani_details, id_to_name, id_to_node, af_ref, af_query))
 }
 
-/// Find single-linkage connected components
-pub fn get_connected_samples(
+/// pub fn single-linkage connected components
+
+pub fn compute_connected_components(
     graph: &Graph<u32, (), Undirected>,
-    ani_details: &HashMap<(u32, u32), f32>,
-    ani_cutoff: f32,
-    id_to_name: &[String],
-    alignedfrac: f32,
-    af_ref: &HashMap<(u32, u32), f32>,
-    af_query: &HashMap<(u32, u32), f32>,
-) -> Vec<HashSet<String>> {
+) -> Vec<HashSet<u32>>  {
     let mut visited = HashSet::new();
     let mut connected_components = Vec::new();
 
@@ -168,16 +164,33 @@ pub fn get_connected_samples(
             while let Some(nx) = dfs.next(&graph) {
                 if visited.insert(nx) {
                     let node_id = graph[nx];
+
                     component.insert(node_id);
-                }
+                 }
             }
             connected_components.push(component);
         }
     }
+    
+    connected_components
+}
+/// Find single-linkage connected components
+pub fn get_connected_samples(
+    graph: &Graph<u32, (), Undirected>,
+    ani_details: &HashMap<(u32, u32), f32>,
+    ani_cutoff: f32,
+    id_to_name: &[String],
+    alignedfrac: f32,
+    af_ref: &HashMap<(u32, u32), f32>,
+    af_query: &HashMap<(u32, u32), f32>,
+) -> Vec<HashSet<String>> {
+    
+    let connected_components = compute_connected_components(graph);
+
     let mut connected_samples: Vec<HashSet<String>> = Vec::new();
     for component in connected_components {
         if component.len() <=2 {
-            let component_names = component
+            let component_names: HashSet<String> = component
                 .into_iter()
                 .map(|id| id_to_name[id as usize].clone())
                 .collect();
