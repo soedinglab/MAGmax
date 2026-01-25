@@ -3,8 +3,12 @@
 use std::collections::{HashMap, HashSet};
 use petgraph::prelude::*;
 use petgraph::visit::{IntoNodeIdentifiers};
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
 use crate::assess::BinQuality;
 use crate::merge;
+use log::{debug};
 
 
 
@@ -46,6 +50,7 @@ pub fn select_highconnectivity_bins(
     bin_qualities: &HashMap<String, BinQuality>,
     completeness_cutoff: f32,
     contamination_cutoff: f32,
+    result_dir: &Path,
     ) -> HashSet<String> {
     let connected_components = merge::compute_connected_components(&graph);
 
@@ -65,16 +70,15 @@ pub fn select_highconnectivity_bins(
                 candidate_bins.push(node_id);
             }
         }
-
+        debug!("component bins {:?}", component);
         if candidate_bins.len()  == 1 {
             let bin_id = candidate_bins[0];
             let bin_name = &id_to_name[bin_id as usize];
-            println!("Selected bin: {}", bin_name);
             rep_set.insert(bin_name.clone());
             continue;
         }
-
-        let mut uncovered: HashSet<u32> = component.clone(); // nodes still needing domination
+        debug!("component candidate bins {:?}", candidate_bins);
+        let mut uncovered: HashSet<u32> = candidate_bins.iter().copied().collect(); // nodes still needing domination
         let mut blocked: HashSet<u32> = HashSet::new(); // cannot be reps (adjacent to existing reps)
         let mut chosen_reps: Vec<u32> = Vec::new();
 
@@ -92,6 +96,7 @@ pub fn select_highconnectivity_bins(
                     let completeness = bin_quality.completeness;
                     let contamination = bin_quality.contamination;
                     let qscore = completeness - (5.0 * contamination);
+                    // debug!("Evaluating bin {}: wdeg {}, qscore {}", bin_name, wdeg, qscore);
                     let better = (wdeg > best_wdeg)
                         || (wdeg == best_wdeg && qscore > best_quality)
                         || (wdeg == best_wdeg && qscore == best_quality && best_bin.map_or(true, |b| n < b));
@@ -112,7 +117,7 @@ pub fn select_highconnectivity_bins(
             blocked.insert(r_id);
             for nb in graph.neighbors(r_ni) {
                 let nb_id = graph[nb];
-                if component.contains(&nb_id) {
+                if candidate_bins.contains(&nb_id) {
                     blocked.insert(nb_id);
                 }
             }
@@ -122,46 +127,79 @@ pub fn select_highconnectivity_bins(
             }
             for nb in graph.neighbors(r_ni) {
                 let nb_id = graph[nb];
-                if component.contains(&nb_id) && uncovered.remove(&nb_id) {
+                if candidate_bins.contains(&nb_id) && uncovered.remove(&nb_id) {
                     assigned_rep.entry(nb_id).or_insert(r_id);
                 }
             }
         }
 
-         for rep_id in chosen_reps {
+        for rep_id in chosen_reps {
+            let nb_id = graph.neighbors(id_to_node[&rep_id]);
+            let nb_count = nb_id.clone().count();
+            for nb_ in nb_id {
+                let nb_node_id = graph[nb_];
+                debug!(" {} {} neighbor: {} {} {:?}", rep_id, id_to_name[rep_id as usize], nb_count, nb_node_id, id_to_name[nb_node_id as usize]);
+            }
             rep_set.insert(id_to_name[rep_id as usize].clone());
         }
 
     }
 
-    let rep_to_members_names = reps_to_members_by_name(&assigned_rep, &id_to_name);
-    for (rep_name, member_names) in rep_to_members_names.iter() {
-        println!("Representative bin: {}", rep_name);
-        println!("  Member bins:");
-        for member in member_names {
-            println!("    {}", member);
-        }
-    }
+    
+    let _ = write_membershipfile(&assigned_rep, id_to_name, result_dir);
     rep_set
 }
 
 
-fn reps_to_members_by_name(
+fn write_membershipfile(
     assigned_rep: &HashMap<u32, u32>, // node_id -> rep_id
     id_to_name: &[String],
-) -> HashMap<String, Vec<String>> {   // rep_name -> [member_names]
-    let mut rep_to_members: HashMap<String, Vec<String>> = HashMap::new();
+    result_dir: &Path
+) -> Result<(), Box<dyn std::error::Error>> {   // rep_name -> [member_names]
 
-    for (&node_id, &rep_id) in assigned_rep.iter() {
-        let rep_name = id_to_name[rep_id as usize].clone();
-        let member_name = id_to_name[node_id as usize].clone();
-        rep_to_members.entry(rep_name).or_default().push(member_name);
+    let membership_filepath: PathBuf = result_dir.join("memberships.tsv");
+    let membership_file = File::create(&membership_filepath)?;
+    let mut w = BufWriter::new(membership_file);
+
+    let mut pairs: Vec<(u32, u32)> = assigned_rep
+        .iter()
+        .map(|(&m, &r)| (r, m))
+        .collect();
+    pairs.sort_unstable();
+
+    
+    let mut cur_rep: Option<u32> = None;
+    let mut members: Vec<String> = Vec::new();
+
+    writeln!(w, "#representative\tmember_genomes")?;
+
+    for (rep_id, member_id) in pairs {
+        if cur_rep != Some(rep_id) {
+            // flush previous rep
+            if let Some(r) = cur_rep {
+                writeln!(
+                    w,
+                    "{}\t{}",
+                    id_to_name[r as usize],
+                    members.join(",")
+                )?;
+                members.clear();
+            }
+            cur_rep = Some(rep_id);
+        }
+        if member_id != rep_id {
+            members.push(id_to_name[member_id as usize].clone());
+        }
     }
 
-    // Optional: deterministic ordering
-    for members in rep_to_members.values_mut() {
-        members.sort();
+    // flush last rep
+    if let Some(r) = cur_rep {
+        writeln!(
+            w,
+            "{}\t{}",
+            id_to_name[r as usize],
+            members.join(",")
+        )?;
     }
-
-    rep_to_members
+    Ok(())
 }
