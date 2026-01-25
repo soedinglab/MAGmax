@@ -133,6 +133,8 @@ pub fn select_highconnectivity_bins(
             }
         }
 
+        // Representatives are chosen by max-weighted independent dominating set. 
+        // Members are assigned to representative with highest connectivity, not by ANI.
         for rep_id in chosen_reps {
             let nb_id = graph.neighbors(id_to_node[&rep_id]);
             let nb_count = nb_id.clone().count();
