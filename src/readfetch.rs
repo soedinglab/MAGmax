@@ -6,7 +6,6 @@ use std::io::{self, BufRead, Write};
 use crate::utility;
 use log::error;
 
-
 /// Read fastq file and collect reads mapped to contigs of merged bin
 pub fn fetch_fastqreads(
     enriched_scaffolds: &HashSet<String>,
@@ -44,12 +43,15 @@ pub fn fetch_fastqreads(
             ]
         };
 
-    let _ = write_selected_reads(
+    if let Err(e) = write_selected_reads(
         fastq_files,
         enriched_scaffolds,
         mapids,
         &output_fastq,
-        is_paired);
+        is_paired
+    ) {
+        error!(" {}", e);
+    };
 
     let file_metadata = std::fs::metadata(&output_fastq[0]).map_err(|e| {
         error!("Error accessing {:?}: {}", output_fastq, e);
@@ -93,7 +95,6 @@ fn write_selected_reads(
         // As of now, it only works for readid format: @SRR3961047.1
         let read_id = parts[0];
         let scaffold_id = parts[1];
-
         // Check if scaffold_id exists in the enriched/combined set
         if enriched_scaffolds.contains(scaffold_id) {
             writeln!(idfile, "{}", read_id)?;
@@ -116,6 +117,9 @@ fn write_selected_reads(
     };
 
     // seqtk can't handle compressed files
+    if which::which("seqtk").is_err() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "`seqtk` not found in PATH"));
+    }
     let process_seqtk = 
         |fastq: &String, outfile: &mut File| -> Result<(), io::Error> {
         let mut child = Command::new("seqtk")
