@@ -1,5 +1,0 @@
-cargo:rerun-if-changed=build.rs
-cargo:rustc-check-cfg=cfg(assert_no_panic)
-cargo:rustc-check-cfg=cfg(feature, values("unstable"))
-cargo:rustc-check-cfg=cfg(feature, values("checked"))
-cargo:rustc-cfg=assert_no_panic
