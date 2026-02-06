@@ -116,7 +116,8 @@ fn write_selected_reads(
     };
 
     // seqtk can't handle compressed files
-    let process_seqtk = |fastq: &String, outfile: &mut File| -> Result<(), io::Error> {
+    let process_seqtk = 
+        |fastq: &String, outfile: &mut File| -> Result<(), io::Error> {
         let mut child = Command::new("seqtk")
             .arg("subseq")
             .arg(fastq)

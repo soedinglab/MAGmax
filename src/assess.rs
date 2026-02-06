@@ -43,7 +43,8 @@ pub fn assess_bins(
             Ok(_) => {
             }
             Err(e) => {
-                error!("Error: Failed to execute CheckM2 command - {}. Check if CheckM2 is executable currently", e);
+                error!("Error: Failed to execute CheckM2 command - {}. 
+                    Check if CheckM2 is executable currently", e);
             }
         }
     }    
@@ -98,37 +99,37 @@ pub fn check_high_quality_bin(
     bin_qualities: &HashMap<String, BinQuality>,
     bindir: &PathBuf,
     resultdir: &PathBuf,
-    format: &String,
-) -> bool {
+    format: &str,
+) -> Option<String> {
 
     let comp_binqualities: HashMap<String, BinQuality> = bin_qualities
         .iter()
-        .filter(|(bin, _)| comp.contains(bin.as_str()))  // Compare as &str
+        .filter(|(bin, _)| comp.contains(bin.as_str()))
         .map(|(bin, q)| (bin.clone(), q.clone()))
         .collect();
 
     if let Some((binname, _)) = comp_binqualities
         .iter()
         .filter(|(_, q)| q.completeness > 90.0)
-        .max_by(|a, b| {
+        .max_by(|(bin1, q1),(bin2, q2)| {
             // select the best bin by quality score
-            let quality_score_a = a.1.completeness - (5.0 * a.1.contamination);
-            let quality_score_b = b.1.completeness - (5.0 * b.1.contamination);
+            let score1 = q1.completeness - (5.0 * q1.contamination);
+            let score2 = q2.completeness - (5.0 * q2.contamination);
 
-            quality_score_a
-                .partial_cmp(&quality_score_b)
-                .unwrap_or(std::cmp::Ordering::Equal) 
-                .then_with(|| a.1.contamination.partial_cmp(&b.1.contamination).unwrap()) // Tie-breaker based on contamination
+            score1
+                .total_cmp(&score2)
+                .then_with(|| q2.contamination.total_cmp(&q1.contamination))
+                .then_with(|| bin2.cmp(bin1).reverse()) // Tie-breaker based on contamination
         })
 
     {
         let bin_path = bindir.join(format!("{}.{}", binname, format));
-        let final_path = resultdir.join(format!("{}.fasta", binname));
+        let final_path = resultdir.join(format!("{}.{}", binname, format));
 
         if let Err(_) = fs::copy(&bin_path, &final_path) {
-            return false;
+            return None;
         }
-        return true;
+        return Some(binname.clone());
     }
-    false
+    None
 }

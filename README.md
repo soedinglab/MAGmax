@@ -14,11 +14,13 @@ MAGmax requires three input directories,
 ## Outputs
 An output directory named `mags_<x>comp_<y>purity` will be created, where `x` and `y` correspond to the user-specified completeness and purity thresholds used to select final bins. By default, MAGmax uses a percentage of 50 for completeness and 95 for purity.
 
-The output directory contains dereplicated bins, and a text file listing the completeness and contamination scores for each bin as calculated by CheckM2.
+The output directory contains dereplicated bins, a text file listing the completeness and contamination scores for each bin as calculated by CheckM2, and memberships text file listing member bins of each representative.
+
 
 ## Example command line call
 
     magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24
+    magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 --anifile ani_edges // output of skani command: skani triangle <bindir> -E -o ani_edges
     magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 -q quality_report.tsv // if CheckM2 result is already available
     magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 --split // if input bins are not already split by sample id
 
@@ -30,6 +32,12 @@ MAGmax provides an option to perform dereplication without reassembly using `--n
     magmax -b <binsdir> --no-reassembly -f fasta -t 24 -q quality_report.tsv // if CheckM2 result is already available
     magmax -b <binsdir> --no-reassembly -f fasta -t 24 --split // if input bins are not already split by sample id
 
+## Dereplication in sensitive mode
+Sensitive mode selects representative genomes based on high-ANI connectivity than bin quality score. It calculates weighted degree (`Σ max(0, ANI − ANI_threshold)`) for each node and select bin with the highest value. This option favors bins that are highly similar to a larger number of neighboring bins, even if they are not the highest-quality bin in the cluster. Bin merging and reassembly steps are disabled in this mode.
+
+    magmax -b <binsdir> -f fasta -t 24 --sensitive
+
+Benchmarking results comparing the default --no-reassembly and --sensitive modes are available in [sensitive_mode.md](https://github.com/soedinglab/MAGmax/blob/main/sensitive_mode.md).
 
 ## Installation
 ### Prerequisites
@@ -92,12 +100,16 @@ Option 3: Build from source
             Number of threads to use [default: 8]
         --no-reassembly
             Perform dereplication without bin merging and reassembly
+        --sensitive
+            Select representatives based on high connectivity. Bin merging and reassembly steps are disabled
         --split
             Split clusters into sample-wise bins before processing
     -q, --qual <QUAL>
             Quality file produced by CheckM2 (quality_report.tsv)
         --anifile <ANIFILE>
             ANI file produced by skani using command: skani triangle <bindir> -E -o <anifile>
+    -o, --outdir <OUTPUT>
+            Directory of output
         --assembler <ASSEMBLER>
             Assembler choice for reassembly step (spades|megahit), spades is recommended [default: spades]
     -h, --help
@@ -112,12 +124,17 @@ This example test run demonstrates dereplication of bins using the provided toy 
 
 To run without reassembly,
 
-    magmax -b test/bins --no-reassembly -t 24 -q test/quality_report.tsv // run dereplication without reassembly
+    magmax -b test/bins --no-reassembly -t 24 -q test/quality_report.tsv
+
+To run in senstive mode,
+
+    magmax -b test/bins --sensitive --t 24 -q test/quality_report.tsv
 
 After running MAGmax, an output folder named `mags_50comp_95purity` will be created in the `test` directory. This folder contains the following files:
 
 - `bins_checkm2_qualities.tsv` — Table summarizing the quality metrics of the dereplicated bins.  
 - `sample_ERR3405607_metabat2_results.63.fasta` — Final bin obtained after dereplication of the input bins.
+- `memberships.tsv` - Text file containing list of representative bins and their member bins. 
 
 ## Input specifications
 1. Input contigs must have IDs prefixed with the sample ID, separated by a `C`. This is a common practice for both single- and multi-sample binning. Ensure mapping and binning are performed on contig files with these updated contig IDs.

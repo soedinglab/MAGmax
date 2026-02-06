@@ -9,7 +9,7 @@ use petgraph::graph::NodeIndex;
 use petgraph::visit::Dfs;
 use petgraph::{Undirected};
 use std::process::{Command, Stdio};
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 use glob::glob;
 use crate::assess::BinQuality;
 use crate::cliques;
@@ -21,8 +21,10 @@ pub fn calc_ani(
     format: &str,
     anifile: Option<PathBuf>,
     ani_cutoff: f32,
+    completeness_cutoff: f32,
     contamination_cutoff: f32,
     alignedfrac: f32,
+    no_reassembly: bool,
     threads: usize
 ) -> Result<(Graph<u32, (), 
     petgraph::Undirected>, 
@@ -71,7 +73,7 @@ pub fn calc_ani(
         info!("Calculating ANI between bins using skani ...");
         get_ani(bin_files, &ani_output, threads)?;
     }
-    // let mut bin_name_to_node: HashMap<String, prelude::NodeIndex> = HashMap::new();
+
     let mut bin_name_to_id: HashMap<String, u32> = HashMap::new();
     let mut id_to_name: Vec<String> = Vec::new();
     let mut id_to_node: HashMap<u32, NodeIndex> = HashMap::new();
@@ -81,12 +83,24 @@ pub fn calc_ani(
 
     let mut graph: Graph<u32, (), Undirected> = Graph::default();
 
-    // Add nodes to graph that pass quality filters
-    for (bin, q) in bin_qualities {
-        if q.contamination < contamination_cutoff && q.completeness > 20.0 {
-            let id = get_or_assign_id(bin, &mut bin_name_to_id, &mut id_to_name);
-            let node = graph.add_node(id);
-            id_to_node.insert(id, node);
+    // Add nodes to graph that pass quality 
+    if no_reassembly {
+        for (bin, q) in bin_qualities {
+            // Filter bins based on both completeness and contamination cutoffs before constructing the graph
+            if q.contamination < contamination_cutoff && q.completeness >= completeness_cutoff {
+                let id = get_or_assign_id(bin, &mut bin_name_to_id, &mut id_to_name);
+                let node = graph.add_node(id);
+                id_to_node.insert(id, node);
+            }
+        }
+    } else {
+        for (bin, q) in bin_qualities {
+            // In reassembly mode, filter contaminated bins only before constructing the graph
+            if q.contamination < contamination_cutoff && q.completeness > 20.0 {
+                let id = get_or_assign_id(bin, &mut bin_name_to_id, &mut id_to_name);
+                let node = graph.add_node(id);
+                id_to_node.insert(id, node);
+            }
         }
     }
 
@@ -197,7 +211,14 @@ pub fn get_connected_samples(
             connected_samples.push(component_names);
         } else {
             let mut subclusters = 
-                cliques::split_component_into_cliques(component, ani_details, ani_cutoff, alignedfrac, af_ref, af_query);
+                cliques::split_component_into_cliques(
+                    component,
+                    ani_details,
+                    ani_cutoff,
+                    alignedfrac,
+                    af_ref,
+                    af_query
+                );
             for cluster in subclusters.drain(..) {
                 let component_names: HashSet<String> = cluster
                     .into_iter()
@@ -253,9 +274,11 @@ pub fn drep_finalbins(
     alignedfrac: f32,
     threads: usize,
     noreassembly: bool,
+    memberships_map: &HashMap<String, String>,
+    format: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     
-    let finalbin_files: Vec<PathBuf> = glob(&format!("{}/*.fasta", result_dir.display()))
+    let finalbin_files: Vec<PathBuf> = glob(&format!("{}/*.{}", result_dir.display(), format))
         .expect("Failed to read glob pattern")
         .filter_map(Result::ok)
         .collect();
@@ -267,6 +290,7 @@ pub fn drep_finalbins(
 
 
     let mut bins_to_remove: HashSet<String> = HashSet::new();
+    let mut bins_pair: HashMap<String, String> = HashMap::new();
 
     if noreassembly{
     
@@ -302,7 +326,10 @@ pub fn drep_finalbins(
             let Some(q2) = bin_qualities.get(bin2) else { continue; };
 
             let worse_bin = find_worsebin(bin1.as_str(), bin2.as_str(), q1, q2);
+            let best_bin = if worse_bin == bin1 { bin2.as_str() } else { bin1.as_str() };
+
             bins_to_remove.insert(worse_bin.to_string());
+            add_edge_keep_best(&mut bins_pair, worse_bin, best_bin, bin_qualities);
 
         }
     } else {
@@ -310,7 +337,10 @@ pub fn drep_finalbins(
         let ani_output: PathBuf = result_dir.join("ani_edges");
 
         if let Err(e) = get_ani(
-            finalbin_files.iter().map(|p| p.to_string_lossy().into_owned()).collect(), 
+            finalbin_files
+            .iter().map(|p| p.to_string_lossy()
+            .into_owned())
+            .collect(), 
             &ani_output,
             threads,
         ) {
@@ -343,9 +373,12 @@ pub fn drep_finalbins(
             if ani >= ani_cutoff &&
                 alignfrac_ref >= alignedfrac
                 && alignfrac_que >= alignedfrac {
-                if let (Some(q1), Some(q2)) = (bin_qualities.get(&bin1), bin_qualities.get(&bin2)) {
+                if let (Some(q1), Some(q2)) = 
+                    (bin_qualities.get(&bin1), bin_qualities.get(&bin2)) {
                     let worse_bin = find_worsebin(bin1.as_str(), bin2.as_str(), q1, q2);
+                    let best_bin = if worse_bin == bin1 { bin2.as_str() } else { bin1.as_str() };
                     bins_to_remove.insert(worse_bin.to_string());
+                    add_edge_keep_best(&mut bins_pair, worse_bin, best_bin, bin_qualities);
                 }
             }
         }
@@ -356,7 +389,12 @@ pub fn drep_finalbins(
     }
     }
 
-    debug!("Length of list with bins to remove: {}", bins_to_remove.len());
+    let updated_memberships = update_memberships_map(
+        memberships_map,
+        &bins_pair,
+        &bins_to_remove,
+    );
+
     let filtered_bin_names: HashSet<String> = bin_names
         .difference(&bins_to_remove)
         .cloned()
@@ -364,13 +402,56 @@ pub fn drep_finalbins(
 
     // Remove redundant bins
     for bin in &bins_to_remove {
-        let bin_file_path = result_dir.join(format!("{}.fasta", bin));
+        let bin_file_path = result_dir.join(format!("{}.{}", bin, &format));
     
         if bin_file_path.exists() {
             remove_file(&bin_file_path).ok();
         }
     }
     
+    let membership_filepath: PathBuf = result_dir.join("memberships.tsv");
+    let membership_file = File::create(&membership_filepath)?;
+    let mut w = BufWriter::new(membership_file);
+
+    //pairs -> (rep, member)
+    let mut pairs: Vec<(String, String)> = updated_memberships
+        .iter()
+        .map(|(member, rep)| (rep.clone(), member.clone())) 
+        .collect();
+    pairs.sort_unstable();
+
+    let mut cur_rep: Option<String> = None;
+    let mut members: Vec<String> = Vec::new();
+
+    writeln!(w, "#representative\tmember_genomes")?;
+
+    for (rep_id, member_id) in pairs {
+        if cur_rep.as_ref() != Some(&rep_id) {
+            if let Some(r) = cur_rep {
+                writeln!(
+                    w,
+                    "{}\t{}",
+                    r,
+                    members.join(",")
+                )?;
+                members.clear();
+            }
+            cur_rep = Some(rep_id.clone());
+        }
+        if member_id != rep_id {
+            members.push(member_id.clone());
+        }
+    }
+
+    if let Some(r) = cur_rep {
+        writeln!(
+            w,
+            "{}\t{}",
+            r,
+            members.join(",")
+        )?;
+    }
+    info!("Membership details are written to {:?}", membership_filepath);
     
     // Write quality measures of bins
     let output_file_path = result_dir.join("bins_checkm2_qualities.tsv");
@@ -381,7 +462,12 @@ pub fn drep_finalbins(
     let mut buffer = String::with_capacity(1024 * 1024);
     for (bin, quality) in bin_qualities.iter() {
         if filtered_bin_names.contains(bin) {
-            buffer.push_str(&format!("{}\t{}\t{}\n", bin, quality.completeness, quality.contamination));
+            buffer.push_str(
+                &format!("{}\t{}\t{}\n",
+                bin,
+                quality.completeness,
+                quality.contamination)
+            );
         }
     }
     writer.write_all(buffer.as_bytes())?;
@@ -451,9 +537,99 @@ fn find_worsebin<'a>(
     } else if score1 < score2 {
         bin1
     } else if q1.contamination < q2.contamination {
-        // tie-breaker: keep lower contamination, remove higher contamination
+        // keep lower contamination, remove higher contamination
         bin2
     } else {
         bin1
     }
+}
+
+fn add_edge_keep_best(
+    bins_pair: &mut HashMap<String, String>,
+    worse: &str,
+    better: &str,
+    bin_qualities: &HashMap<String, BinQuality>,
+) {
+    match bins_pair.get(worse) {
+        None => {
+            bins_pair.insert(worse.to_string(), better.to_string());
+        }
+        Some(prev_better) if prev_better == better => {}
+        Some(prev_better) => {
+
+            let (Some(q_prev), Some(q_new)) = 
+                (bin_qualities.get(prev_better), bin_qualities.get(better)) else {
+                return;
+            };
+
+            let worse_of_candidates = find_worsebin(
+                prev_better.as_str(),
+                better,
+                q_prev,
+                q_new
+            );
+            let best_of_candidates = if worse_of_candidates == prev_better.as_str() {
+                better
+            } else {
+                prev_better.as_str()
+            };
+
+            bins_pair.insert(worse.to_string(), best_of_candidates.to_string());
+        }
+    }
+}
+
+fn update_memberships_map(
+    memberships_map: &HashMap<String, String>,
+    bins_pair: &HashMap<String, String>,
+    bins_to_remove: &HashSet<String>,
+) -> HashMap<String, String> {
+
+    // Memoization cache: rep -> final_rep
+    let mut memo: HashMap<String, String> = HashMap::new();
+
+    fn resolve_rep(
+        rep: &str,
+        bins_to_remove: &HashSet<String>,
+        next: &HashMap<String, String>,
+        memo: &mut HashMap<String, String>,
+    ) -> Option<String> {
+        if let Some(v) = memo.get(rep) {
+            return Some(v.clone());
+        }
+
+        let mut cur = rep;
+        let mut path: Vec<String> = Vec::new();
+
+        while bins_to_remove.contains(cur) {
+            path.push(cur.to_string());
+            let Some(n) = next.get(cur) else {
+                return None;
+            };
+            cur = n.as_str();
+        }
+
+        let final_rep = cur.to_string();
+
+        for p in path {
+            memo.insert(p, final_rep.clone());
+        }
+        memo.insert(rep.to_string(), final_rep.clone());
+
+        Some(final_rep)
+    }
+
+    let mut updated = HashMap::with_capacity(memberships_map.len());
+    for (member, rep) in memberships_map {
+        let new_rep = resolve_rep(
+            rep.as_str(),
+            bins_to_remove,
+            &bins_pair,
+            &mut memo
+        ).unwrap_or_else(|| rep.clone());
+
+        updated.insert(member.clone(), new_rep);
+    }
+
+    updated
 }

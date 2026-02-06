@@ -15,7 +15,7 @@ pub fn run_reassembly(
     outputdir: &PathBuf,
     is_paired: bool,
     threads: usize,
-    assembler: &String,
+    assembler: &str,
     resultdir: &PathBuf,
     id: usize,
     bindir: &PathBuf,
@@ -24,15 +24,15 @@ pub fn run_reassembly(
     merged_bin_quality: &Arc<Mutex<HashMap<String, BinQuality>>>,
     completeness_cutoff: f32,
     contamination_cutoff: f32,
-    format: &String
-) {
+    format: &str,
+) -> Option<String> {
     
     if readfile.is_empty() {
         error!("Error: No read files provided.");
         exit(1);
     }
 
-    let command_status = match assembler.as_str() {
+    let command_status = match assembler {
         // Default and recommended option: spades
         "spades" => {
             let status = run_spades(readfile, binfile, outputdir, is_paired, threads);
@@ -44,7 +44,7 @@ pub fn run_reassembly(
         "megahit" => run_megahit(readfile, outputdir, is_paired, threads),
         _ => {
             error!("Unknown assembler: {}", assembler);
-            return;
+            return None;
         }
     };
 
@@ -90,62 +90,92 @@ pub fn run_reassembly(
 
     if let Err(e) = command_status {
         error!("Assembler failed: {}", e);
-        let _ = select_bestqualitybin(
+        return select_bestqualitybin(
             selected_bin,
             bindir,
             resultdir,
             format
         );
-        return;
     }
 
     let merged_bin_path = if assembler == "spades" {
         outputdir.join("scaffolds_filtered.fasta")
     } else {
-        outputdir.join("final.contigs.fa")
+        let _ = fs::rename(
+            outputdir
+            .join("final.contigs.fa"),
+            outputdir.join("final.contigs.fasta"));
+        outputdir.join("final.contigs.fasta")
     };
 
     // Compare the quality of reassembled bin with the best quality bin in the cluster
     if let Ok(merged_checkm2_output) =
-        assess_bins(&merged_bin_path, &outputdir.join("checkm2_results"), threads, "fasta")
-        {
-            if let Ok(mut bin_quality_map) = parse_bins_quality(&merged_checkm2_output) {
-                if let Some((_, bin_quality)) = bin_quality_map.drain().next() {
-                    let quality_score = bin_quality.completeness - (5.0 * bin_quality.contamination);
-                    if bin_quality.contamination < contamination_cutoff
-                        && bin_quality.completeness >= completeness_cutoff
-                        && quality_score > selected_quality_score
-
-                    {
-                        let _ = fs::rename(&merged_bin_path, resultdir.join(format!("{}_merged.fasta", id)));
-                        match merged_bin_quality.lock() {
-                            Ok(mut mergedbin_quality_map) => {
-                                mergedbin_quality_map.insert(format!("{}_merged", id), bin_quality);
-                            },
-                            Err(e) => {
-                                warn!("Error locking the mutex: {}", e);
-                            }
+        assess_bins(
+            &merged_bin_path,
+            &outputdir.join("checkm2_results"),
+            threads, "fasta")
+    {
+        if let Ok(mut bin_quality_map) = 
+            parse_bins_quality(&merged_checkm2_output) {
+            if let Some((_, bin_quality)) = bin_quality_map.drain().next() {
+                let quality_score = bin_quality.completeness - (5.0 * bin_quality.contamination);
+                if bin_quality.contamination < contamination_cutoff
+                    && bin_quality.completeness >= completeness_cutoff
+                    && quality_score > selected_quality_score
+                {
+                    let _ = fs::rename(
+                        &merged_bin_path,
+                        resultdir.join(format!("{}_merged.{}",
+                        id,
+                        format)
+                    ));
+                    match merged_bin_quality.lock() {
+                        Ok(mut mergedbin_quality_map) => {
+                            mergedbin_quality_map.insert(format!("{}_merged", id), bin_quality);
+                            return Some(format!("{}_merged", id));
+                        },
+                        Err(e) => {
+                            warn!("Error locking the mutex: {}", e);
+                            return None;
                         }
-                    } else {
-                        let _ = select_bestqualitybin(
-                            selected_bin,
-                            bindir,
-                            resultdir,
-                            format
-                        );
                     }
+                } else {
+                    return select_bestqualitybin(
+                        selected_bin,
+                        bindir,
+                        resultdir,
+                        format
+                    );
                 }
+            } else {
+                // No bin quality found
+                warn!("No bin quality found in merged bin.");
+                return select_bestqualitybin(
+                    selected_bin,
+                    bindir,
+                    resultdir,
+                    format
+                );
+            }
         } else {
             warn!("Failed to parse bin qualities.");
-            let _ = select_bestqualitybin(
+            return select_bestqualitybin(
                 selected_bin,
                 bindir,
                 resultdir,
                 format
             );
         }
+    } else {
+        // assess_bins failed
+        warn!("Failed to assess merged bin with checkm2.");
+        return select_bestqualitybin(
+            selected_bin,
+            bindir,
+            resultdir,
+            format
+        );
     }
-
 }
 
 // Run spades for reassembly
@@ -177,7 +207,8 @@ fn run_spades(
 
     cmd.status().map(|status| {
         if !status.success() {
-            Err(std::io::Error::new(std::io::ErrorKind::Other, "SPAdes failed due to low k-mer counts"))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other, "SPAdes failed due to low k-mer counts"))
         } else {
             Ok(())
         }
@@ -278,22 +309,22 @@ pub fn find_bestqualitybin(
     .iter()
     .filter_map(|bin| {
         bin_qualities.get(bin).map(|quality| {
-            (bin.clone(), quality.completeness, quality.contamination)
+            (bin, quality.completeness, quality.contamination)
         })
     })
     .filter(|(_, completeness, _)| *completeness >= completeness_cutoff)
-    .max_by(|(_, completeness1, contamination1), (_, completeness2, contamination2)| {
+    .max_by(|(bin1, completeness1, contamination1),
+        (bin2, completeness2, contamination2)| {
         let score1 = completeness1 - (5.0 * contamination1);
         let score2 = completeness2 - (5.0 * contamination2);
 
         score1
-        .partial_cmp(&score2)
-        .unwrap_or(std::cmp::Ordering::Equal)
-        .then_with(|| contamination1
-            .partial_cmp(contamination2)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .reverse())
+        .total_cmp(&score2)
+        .then_with(|| contamination2.total_cmp(contamination1))
+        .then_with(|| bin2.cmp(bin1).reverse())
     })
+    .map(|(bin, completeness, contamination)| (bin.to_string(),
+        completeness, contamination))
 }
 
 // Select the best bin among the cluster members and reassembled bin
@@ -301,19 +332,20 @@ pub fn select_bestqualitybin(
     selected_bin: Option<String>,
     bindir: &PathBuf,
     outputpath: &PathBuf,
-    format: &String
-) -> io::Result<()> {
+    format: &str
+) -> Option<String> {
 
     if let Some(bin_id) = selected_bin {
+
         let bin_path = bindir.join(format!("{}.{}", bin_id, format));
-        let output_file = outputpath.join(format!("{}.fasta", bin_id));
+        let output_file = outputpath.join(format!("{}.{}", bin_id, format));
         
         if !output_file.exists() {
             if let Err(e) = fs::copy(&bin_path, &output_file) {
                 error!("Failed to copy {}: {}", bin_id, e);
             }
         }
+        return Some(bin_id.to_string());
     }
-    Ok(())
-
+    return None;
 }

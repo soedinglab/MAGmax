@@ -14,7 +14,14 @@ pub fn split_component_into_cliques(
     af_query: &HashMap<(u32, u32), f32>,
 ) -> Vec<HashSet<u32>> {
 
-    let adj = build_adj(&component, ani_details, ani_cutoff, aligned_frac, af_ref, af_query);
+    let adj = build_adj(
+        &component,
+        ani_details,
+        ani_cutoff,
+        aligned_frac,
+        af_ref,
+        af_query
+    );
 
     let mut remaining = component;
     let mut subclusters: Vec<HashSet<u32>> = Vec::new();

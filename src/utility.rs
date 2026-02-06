@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::fs::{self, read_to_string, File};
 use std::io::{self, BufRead, BufReader, Write};
 use std::process::exit;
+use std::sync::{Arc, Mutex};
 use log::error;
 
 // Helper function
@@ -21,7 +22,8 @@ pub fn validate_path<'a>(path: Option<&'a PathBuf>, name: &'a str, suffix: &str)
 
     let contains_files_with_suffix = fs::read_dir(path)
         .expect("Failed to read directory")
-        .filter_map(|entry| entry.ok()) // Filter out invalid entries
+        // Filter out invalid entries
+        .filter_map(|entry| entry.ok())
         .any(|entry| {
             if let Some(file_name) = entry.file_name().to_str() {
                 file_name.contains(suffix)
@@ -84,7 +86,9 @@ pub fn get_binfiles(dir: &Path, extension: &str) -> io::Result<Vec<PathBuf>> {
             let filename = path.file_name()
                 .unwrap_or_default()
                 .to_str().unwrap_or_default();
-            if filename.contains("_all_seqs") || filename.contains("rep_seq") || filename.contains("combined") {
+            if filename.contains("_all_seqs") ||
+                filename.contains("rep_seq") ||
+                filename.contains("combined") {
                 continue;
             }
 
@@ -137,7 +141,7 @@ pub fn splitbysampleid(
     bin: &PathBuf,
     bin_name: &str,
     binspecificdir: &PathBuf,
-    format: &String,
+    format: &str,
 ) -> io::Result<()>{
 
     if !binspecificdir.exists() {
@@ -178,7 +182,7 @@ pub fn ensure_writer(
     sample_id: &str,
     bin_name: &str,
     binspecificdir: &Path,
-    format: &String,
+    format: &str,
     writers: &mut HashMap<String, File>,
 ) -> io::Result<()> {
     if !writers.contains_key(sample_id) {
@@ -186,7 +190,9 @@ pub fn ensure_writer(
             binspecificdir
             .join(
             format!("{}_{}.{}"
-            ,bin_name,sample_id, format));
+            ,bin_name,sample_id,
+            format)
+        );
         let output_file =
             File::create(output_filename)?;
         writers.insert(
@@ -195,6 +201,21 @@ pub fn ensure_writer(
         , output_file);
     }
     Ok(())
+}
+
+// Helper function
+pub fn assign_members(
+    component: &HashSet<String>,
+    rep: &str,
+    memberships_map: &Arc<Mutex<HashMap<String, String>>>,
+) {
+    if let Ok(mut map) = memberships_map.lock() {
+        let rep_s = rep.to_string();
+        for m in component.iter() {
+            // member -> representative
+            map.insert(m.clone(), rep_s.clone());
+        }
+    }
 }
 
 // Helper function
