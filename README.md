@@ -12,15 +12,15 @@ MAGmax requires three input directories,
 3. `<mapid_dir>`, directory containing mapping files for each sample. Each file is a text file listing read IDs and the corresponding contig IDs they mapped to. These files are used to retrieve reads that map to each merged bin from the FASTQ files in `<readdir>` and to generate new bin-specific FASTQ files for reassembly.
 
 ## Outputs
-An output directory named `mags_<x>comp_<y>purity` will be created, where `x` and `y` correspond to the user-specified completeness and purity thresholds used to select final bins. By default, MAGmax uses a percentage of 50 for completeness and 95 for purity.
+By default, an output directory named `mags_<x>comp_<y>purity` will be created, where `x` and `y` correspond to the user-specified completeness and purity thresholds used to select final bins. If unspecified, MAGmax sets a percentage of 50 for completeness and 95 for purity. With `-o` option, user can specify the output directory. 
 
-The output directory contains dereplicated bins, a text file listing the completeness and contamination scores for each bin as calculated by CheckM2, and memberships text file listing member bins of each representative.
+The output directory contains dereplicated bins, a text file listing the completeness and contamination scores for each bin as calculated by CheckM2, and memberships file listing members for each selected representative.
 
 
 ## Example command line call
 
     magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24
-    magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 --anifile ani_edges // output of skani command: skani triangle <bindir> -E -o ani_edges
+    magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 --anifile ani_edges // if skani output is available from (skani triangle <bindir> -E -o ani_edges)
     magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 -q quality_report.tsv // if CheckM2 result is already available
     magmax -b <binsdir> -r <readdir> -m <mapid_dir> -f fasta -t 24 --split // if input bins are not already split by sample id
 
@@ -37,7 +37,7 @@ Sensitive mode selects representative genomes based on high-ANI connectivity tha
 
     magmax -b <binsdir> -f fasta -t 24 --sensitive
 
-Benchmarking results comparing the default --no-reassembly and --sensitive modes are available in [sensitive_mode.md](https://github.com/soedinglab/MAGmax/blob/main/sensitive_mode.md).
+This mode is recommended when user wants to generate custom reference database for taxonomic assignment. Benchmarking results comparing the default --no-reassembly and --sensitive modes are available in [sensitive_mode.md](https://github.com/soedinglab/MAGmax/blob/main/sensitive_mode.md).
 
 ## Installation
 ### Prerequisites
