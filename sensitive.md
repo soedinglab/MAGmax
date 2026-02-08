@@ -8,4 +8,4 @@ Our results showed that there is no sytematic bias between two modes (upper and 
 
 <img width="5319" height="2297" alt="n50_genecount_twomodecomp" src="https://github.com/user-attachments/assets/fe07ab10-d185-447e-b024-33c07a9d8e47" />
 
-Taxonomic labels of the representatives and member genomes are consistent between both modes. The number of final replicated genomes, however, differs between the two modes, with 12976 genomes in `--sensitive` and 12935 in `--no-reassembly`. This difference is expected due to the use of different algorithms.
+Taxonomic labels of the representatives and member genomes are consistent between both modes. The number of final replicated genomes, differs between the two modes, with 12976 genomes in `--sensitive` and 12935 in `--no-reassembly`. This is expected, given that the two modes use different algorithms.
