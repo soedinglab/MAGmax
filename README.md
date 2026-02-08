@@ -37,7 +37,7 @@ Sensitive mode selects representative genomes based on high-ANI connectivity tha
 
     magmax -b <binsdir> -f fasta -t 24 --sensitive
 
-This mode is recommended when user wants to generate custom reference database for taxonomic assignment. Benchmarking results comparing the default --no-reassembly and --sensitive modes are available in [sensitive_mode.md](https://github.com/soedinglab/MAGmax/blob/main/sensitive_mode.md).
+Benchmarking results comparing the default --no-reassembly and --sensitive modes are available in [sensitive_mode.md](https://github.com/soedinglab/MAGmax/blob/main/sensitive_mode.md).
 
 ## Installation
 ### Prerequisites

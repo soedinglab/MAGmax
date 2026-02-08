@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.3.0] - 2026-02-06
+### Added
+- New **sensitive** (from `repsel_bymaxedges` branch) to select representative bins by maximum number of high-ANI connectivity.
+- Implemented using greedy maximum weighted dominating set algorithm
+- Minor refactoring to improve code reability & updated README.md
+
 ## [1.2.0] - 2026-01-05
 ### Added
 - New **parallel clique-based dereplication workflow** (from `parallel-cliques` branch) to improve scalability on large connected components
