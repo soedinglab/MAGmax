@@ -52,29 +52,6 @@ pub fn run_reassembly(
     let mut selected_completeness: Option<f32> = None;
     let mut selected_contamination: Option<f32> = None;
 
-    // Find the best bin based on quality score within the cluster
-    // if let Some((bin_name, completeness, contamination)) = component
-    //     .iter()
-    //     .filter_map(|bin| {
-    //         bin_qualities.get(bin).map(|quality| (bin, quality.completeness, quality.contamination))
-    //     })
-    //     .filter(|(_, completeness, _)| *completeness >= completeness_cutoff)
-    //     .max_by(|(_, completeness1, contamination1), (_, completeness2, contamination2)| {
-
-    //         let score1 = completeness1 - (5.0 * contamination1);
-    //         let score2 = completeness2 - (5.0 * contamination2);
-            
-    //         score1
-    //             .partial_cmp(&score2)
-    //             .unwrap_or(std::cmp::Ordering::Equal)
-    //             .then_with(|| contamination1.partial_cmp(contamination2).unwrap_or(std::cmp::Ordering::Equal).reverse())
-    //     })
-    // {
-    //     selected_bin = Some(bin_name.to_string());
-    //     selected_completeness = Some(completeness);
-    //     selected_contamination = Some(contamination);
-    // }
-
     if let Some((bin_name, completeness, contamination)) =
         find_bestqualitybin(component, &bin_qualities, completeness_cutoff)
     {
@@ -186,7 +163,14 @@ fn run_spades(
     is_paired: bool,
     threads: usize,
 ) -> std::io::Result<()> {
-    let mut cmd = ProcessCommand::new("spades.py");
+
+    
+    let spades = which::which("spades.py").map_err(|_| {
+        io::Error::new(io::ErrorKind::NotFound, "`spades.py` not found in PATH")
+    })?;
+
+    let mut cmd = ProcessCommand::new(spades);
+
     cmd.arg("--trusted-contigs")
         .arg(binfile)
         .arg("--only-assembler")

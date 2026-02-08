@@ -1,3 +1,21 @@
+<<<<<<< HEAD
 
 # Rust build artifacts
 target/
+=======
+# Rust
+target/
+
+# Outputs
+output/
+
+# Generated test data
+test/bins/ani_edges
+test/mags_50comp_95purity
+
+# Large generated files
+*.fastq
+*.fasta
+*.tsv
+
+>>>>>>> repsel_bymaxedges

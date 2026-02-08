@@ -612,7 +612,6 @@ fn process_components_reassemble(
         fs::remove_dir_all(&selected_binset_path)?;
     }
     fs::create_dir(&selected_binset_path)?;
-
     // Merge bins within the cluster
     merge::combine_fastabins(
     &bindir,

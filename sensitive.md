@@ -7,5 +7,3 @@ We compared N50 and gene counts between representative sets from sensitive and n
 Our results showed that there is no sytematic bias between two modes.
 
 <img width="5319" height="2297" alt="n50_genecount_twomodecomp" src="https://github.com/user-attachments/assets/fe07ab10-d185-447e-b024-33c07a9d8e47" />
-
-**NOTE: Sensitive mode is suitable if you want to generate custom reference databases for taxonomic assignment.**
