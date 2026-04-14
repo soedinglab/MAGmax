@@ -175,3 +175,6 @@ MAGmax is stricter than Galah in dereplicating bins and exhibits similar computa
 
 ## Citation
 Arangasamy Yazhini, Johannes Söding, Enhancing genome recovery across metagenomic samples using MAGmax, Bioinformatics (2025), https://doi.org/10.1093/bioinformatics/btaf538.
+
+## Data resource
+Dataset used for this study is available in 10.5281/zenodo.19545550.
