@@ -196,6 +196,10 @@ pub fn run(args: &CustomDbArgs) -> io::Result<()> {
     fs::create_dir_all(&output_dir)?;
 
     let mut memberships_map = group_perfect_bins_by_species(&perfect_bins, &bin_qualities);
+    write_gtdbtk_species_representatives(
+        &memberships_map,
+        &output_dir.join("gtdbtk_species_representatives.tsv"),
+    )?;
     let mut representative_bins: HashSet<String> = memberships_map.keys().cloned().collect();
 
     let remaining_bin_set: HashSet<String> = remaining_bins.into_iter().collect();
@@ -496,6 +500,27 @@ fn copy_representative_bins(
             fs::copy(&bin_path, &final_path)?;
         }
     }
+    Ok(())
+}
+
+fn write_gtdbtk_species_representatives(
+    memberships_map: &HashMap<String, Vec<String>>,
+    output_path: &Path,
+) -> io::Result<()> {
+    let output_file = File::create(output_path)?;
+    let mut writer = BufWriter::new(output_file);
+    let mut representatives: Vec<&String> = memberships_map.keys().collect();
+    representatives.sort_unstable();
+
+    writeln!(writer, "#gtdbtk_species_representative")?;
+    for rep in representatives {
+        writeln!(writer, "{}", rep)?;
+    }
+
+    info!(
+        "GTDB-Tk species representatives are written to {:?}",
+        output_path
+    );
     Ok(())
 }
 
