@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
@@ -144,8 +144,9 @@ pub fn run(args: &CustomDbArgs) -> io::Result<()> {
         info!("  Output Directory: {:?}", output);
     }
 
-    let mut bindir = utility::validate_path(args.bindir.as_ref(), "bindir", &args.format).to_path_buf();
-    
+    let mut bindir =
+        utility::validate_path(args.bindir.as_ref(), "bindir", &args.format).to_path_buf();
+
     if args.split {
         info!("  Split bins before processing: true");
 
@@ -168,17 +169,18 @@ pub fn run(args: &CustomDbArgs) -> io::Result<()> {
         bindir = utility::split_bins_by_sample(&parentdir, &binfiles, &args.format, &pool)?;
     }
 
-    let high_quality_bins = filter_bins_by_quality(args, Some(&bindir))?;
+    let bin_qualities = filter_bins_by_quality(args, Some(&bindir))?;
+    let quality_filtered_bins: HashSet<String> = bin_qualities.keys().cloned().collect();
     info!(
         "Quality filtering retained {} bins",
-        high_quality_bins.len()
+        quality_filtered_bins.len()
     );
 
     let gtdb_bins = parse_gtdbtk_summary(
         &args.gtdbtk,
         args.species_ani,
         args.species_alignedfrac,
-        &high_quality_bins,
+        &quality_filtered_bins,
     )?;
     let perfect_bins = gtdb_bins.perfect;
     let remaining_bins = gtdb_bins.remaining;
@@ -189,13 +191,76 @@ pub fn run(args: &CustomDbArgs) -> io::Result<()> {
         remaining_bins.len()
     );
 
+    let memberships_map = group_perfect_bins_by_species(&perfect_bins, &bin_qualities);
+    let output_dir = customdb_output_dir(args, &bindir);
+    fs::create_dir_all(&output_dir)?;
+    utility::write_membership_file(&memberships_map, &output_dir.join("memberships.tsv"))?;
+
     Ok(())
+}
+
+fn customdb_output_dir(args: &CustomDbArgs, bindir: &PathBuf) -> PathBuf {
+    args.output.clone().unwrap_or_else(|| {
+        bindir
+            .parent()
+            .map(|parent| parent.join("customdb_results"))
+            .unwrap_or_else(|| bindir.join("customdb_results"))
+    })
+}
+
+fn group_perfect_bins_by_species(
+    perfect_bins: &PerfectGtdbBins,
+    bin_qualities: &HashMap<String, assess::BinQuality>,
+) -> HashMap<String, Vec<String>> {
+    let mut species_bins: HashMap<String, Vec<String>> = HashMap::new();
+
+    for (bin, species) in perfect_bins {
+        species_bins
+            .entry(species.clone())
+            .or_default()
+            .push(bin.clone());
+    }
+
+    let mut memberships_map = HashMap::new();
+    for bins in species_bins.values_mut() {
+        bins.sort_unstable();
+        let Some(rep) = select_best_quality_bin(bins, bin_qualities) else {
+            continue;
+        };
+
+        let members = bins
+            .iter()
+            .filter(|bin| *bin != &rep)
+            .cloned()
+            .collect::<Vec<_>>();
+        memberships_map.insert(rep, members);
+    }
+
+    memberships_map
+}
+
+fn select_best_quality_bin(
+    bins: &[String],
+    bin_qualities: &HashMap<String, assess::BinQuality>,
+) -> Option<String> {
+    bins.iter()
+        .filter_map(|bin| bin_qualities.get(bin).map(|quality| (bin, quality)))
+        .max_by(|(bin1, q1), (bin2, q2)| {
+            let score1 = q1.completeness - (5.0 * q1.contamination);
+            let score2 = q2.completeness - (5.0 * q2.contamination);
+
+            score1
+                .total_cmp(&score2)
+                .then_with(|| q2.contamination.total_cmp(&q1.contamination))
+                .then_with(|| bin2.cmp(bin1).reverse())
+        })
+        .map(|(bin, _)| bin.clone())
 }
 
 fn filter_bins_by_quality(
     args: &CustomDbArgs,
     bindir: Option<&PathBuf>,
-) -> io::Result<HashSet<String>> {
+) -> io::Result<HashMap<String, assess::BinQuality>> {
     let checkm2_qualities = if let Some(qual_path) = &args.qual {
         if qual_path.is_file()
             && fs::metadata(qual_path)
@@ -238,19 +303,14 @@ fn run_checkm2_for_customdb(args: &CustomDbArgs, bindir: Option<&PathBuf>) -> io
             "--bindir is required when --qual is not provided or is missing/empty",
         )
     })?;
-    let output_dir = args.output.clone().unwrap_or_else(|| {
-        bindir
-            .parent()
-            .map(|parent| parent.join("customdb_results"))
-            .unwrap_or_else(|| bindir.join("customdb_results"))
-    });
+    let output_dir = customdb_output_dir(args, bindir);
     fs::create_dir_all(&output_dir)?;
     let checkm2_outputpath = output_dir.join("checkm2_results");
 
     assess::assess_bins(bindir, &checkm2_outputpath, args.threads, &args.format)
 }
 
-pub type PerfectGtdbBins = Vec<(String, String)>;
+pub type PerfectGtdbBins = HashMap<String, String>;
 
 #[derive(Debug, Clone)]
 pub struct GtdbBins {
@@ -270,7 +330,7 @@ fn parse_gtdbtk_summary(
     summary_path: &Path,
     ani_species: f32,
     af_species: f32,
-    high_quality_bins: &HashSet<String>,
+    quality_filtered_bins: &HashSet<String>,
 ) -> io::Result<GtdbBins> {
     const COL_GENOME: usize = 0;
     const COL_CLASSIF: usize = 1;
@@ -279,7 +339,7 @@ fn parse_gtdbtk_summary(
 
     let infile = File::open(summary_path)?;
     let reader = BufReader::new(infile);
-    let mut perfect = Vec::new();
+    let mut perfect = HashMap::new();
     let mut remaining = Vec::new();
     let af_species = normalize_af_cutoff(af_species);
 
@@ -308,7 +368,7 @@ fn parse_gtdbtk_summary(
 
         let genome = fields[COL_GENOME].trim();
         let genome_name = strip_bin_extension(genome);
-        if !high_quality_bins.contains(genome_name) {
+        if !quality_filtered_bins.contains(genome_name) {
             continue;
         }
         let classification = fields[COL_CLASSIF].trim();
@@ -320,7 +380,7 @@ fn parse_gtdbtk_summary(
         // ANI >= 95% and aligned fraction >= 50% with an assigned species name
         if closest_ani >= ani_species && closest_af >= af_species {
             if let Some(species) = species {
-                perfect.push((genome_name.to_string(), species.to_string()));
+                perfect.insert(genome_name.to_string(), species.to_string());
                 continue;
             }
         }
