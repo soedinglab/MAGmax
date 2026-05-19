@@ -1,14 +1,14 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use clap::Args;
-use log::info;
+use log::{info, warn};
 use rayon::ThreadPoolBuilder;
 
-use crate::{assess, utility};
+use crate::{assess, merge, mwids, reassemble, utility};
 
 #[derive(Args, Debug)]
 
@@ -184,6 +184,7 @@ pub fn run(args: &CustomDbArgs) -> io::Result<()> {
     )?;
     let perfect_bins = gtdb_bins.perfect;
     let remaining_bins = gtdb_bins.remaining;
+    let sp_aniradius = gtdb_bins.sp_aniradius;
 
     info!(
         "GTDB-Tk summary parsed: {} perfect bins and {} remaining/unclassified bins",
@@ -191,11 +192,338 @@ pub fn run(args: &CustomDbArgs) -> io::Result<()> {
         remaining_bins.len()
     );
 
-    let memberships_map = group_perfect_bins_by_species(&perfect_bins, &bin_qualities);
     let output_dir = customdb_output_dir(args, &bindir);
     fs::create_dir_all(&output_dir)?;
-    utility::write_membership_file(&memberships_map, &output_dir.join("memberships.tsv"))?;
 
+    let mut memberships_map = group_perfect_bins_by_species(&perfect_bins, &bin_qualities);
+    let mut representative_bins: HashSet<String> = memberships_map.keys().cloned().collect();
+
+    let remaining_bin_set: HashSet<String> = remaining_bins.into_iter().collect();
+    let remaining_qualities: HashMap<String, assess::BinQuality> = bin_qualities
+        .iter()
+        .filter(|(bin, _)| remaining_bin_set.contains(*bin))
+        .map(|(bin, quality)| (bin.clone(), quality.clone()))
+        .collect();
+
+    if !remaining_qualities.is_empty() {
+        let (remaining_reps, remaining_memberships) =
+            process_remaining_bins(args, &bindir, &remaining_qualities)?;
+        write_remaining_species_ani_report(
+            args,
+            &bindir,
+            &remaining_reps,
+            &mut memberships_map,
+            &representative_bins,
+            &sp_aniradius,
+            &output_dir,
+        )?;
+        representative_bins.extend(remaining_reps);
+        merge_memberships(&mut memberships_map, remaining_memberships);
+    }
+
+    copy_representative_bins(&representative_bins, &bindir, &output_dir, &args.format)?;
+    utility::write_membership_file(&memberships_map, &output_dir.join("memberships.tsv"))?;
+    write_quality_file(&representative_bins, &bin_qualities, &output_dir)?;
+
+    Ok(())
+}
+
+fn write_remaining_species_ani_report(
+    args: &CustomDbArgs,
+    bindir: &PathBuf,
+    remaining_reps: &HashSet<String>,
+    memberships_map: &mut HashMap<String, Vec<String>>,
+    representative_bins: &HashSet<String>,
+    sp_aniradius: &HashMap<String, f32>,
+    output_dir: &Path,
+) -> io::Result<()> {
+    if remaining_reps.is_empty() || representative_bins.is_empty() {
+        return Ok(());
+    }
+
+    // `ani_details` is keyed by internal node IDs from the remaining-bin graph.
+    // For remaining-vs-existing-cluster checks, use the skani TSV keyed by bin names.
+    let ani_by_name = load_ani_by_name(args, bindir)?;
+
+    let report_path =
+        output_dir.join("unclassified_clusterrepresentatives_gtdbtkspecies_ani_connections.tsv");
+    let report_file = File::create(&report_path)?;
+    let mut writer = BufWriter::new(report_file);
+    let mut reps: Vec<&String> = remaining_reps.iter().collect();
+    reps.sort_unstable();
+    let mut cluster_reps: Vec<&String> = representative_bins.iter().collect();
+    cluster_reps.sort_unstable();
+
+    writeln!(
+        writer,
+        "#unclassfiedcluster_representative\tgtdbtkspeciesrep\tANI\tspciesANI_radius\tall_members_shareANI_aboveradius"
+    )?;
+
+    for remaining_rep in reps {
+        for cluster_rep in &cluster_reps {
+            if remaining_rep == *cluster_rep {
+                warn!(
+                    "Unclassified representative {} is identical to GTDB-Tk species cluster representative {}. Check carefully!",
+                    remaining_rep, cluster_rep
+                );
+                continue;
+            }
+
+            let mut cluster_members = Vec::new();
+            cluster_members.push((*cluster_rep).clone());
+            if let Some(members) = memberships_map.get(*cluster_rep) {
+                cluster_members.extend(members.iter().cloned());
+            }
+            cluster_members.sort_unstable();
+
+            let mut member_ani = Vec::new();
+            let mut all_members_above_species_ani = true;
+
+            let Some(rep_ani) = lookup_ani_by_name(remaining_rep, cluster_rep, &ani_by_name) else {
+                continue;
+            };
+            if rep_ani >= sp_aniradius.get(*cluster_rep).copied().unwrap_or(0.0) {
+                member_ani.push(format!("{}:{:.4}", cluster_rep, rep_ani));
+            }
+            for member in &cluster_members {
+                if remaining_rep == member {
+                    warn!(
+                    "Unclassified representative {} is identical to GTDB-Tk species cluster member {}. Check carefully!",
+                    remaining_rep, member
+                    );
+                    continue;
+                }
+
+                let Some(ani) = lookup_ani_by_name(remaining_rep, member, &ani_by_name) else {
+                    all_members_above_species_ani = false;
+                    break;
+                };
+
+                if ani < sp_aniradius.get(member).copied().unwrap_or(0.0) {
+                    all_members_above_species_ani = false;
+                    break;
+                }
+            }
+
+            writeln!(
+                writer,
+                "{}\t{}\t{:4}\t{:4}\t{}",
+                remaining_rep,
+                cluster_rep,
+                rep_ani,
+                sp_aniradius.get(*cluster_rep).copied().unwrap_or(0.0),
+                all_members_above_species_ani,
+            )?;
+        }
+    }
+
+    info!(
+        "Remaining representative species-ANI report is written to {:?}",
+        report_path
+    );
+    Ok(())
+}
+
+fn load_ani_by_name(
+    args: &CustomDbArgs,
+    bindir: &PathBuf,
+) -> io::Result<HashMap<(String, String), f32>> {
+    let ani_file = args
+        .anifile
+        .clone()
+        .filter(|path| path.exists())
+        .unwrap_or_else(|| bindir.join("ani_edges"));
+
+    let infile = File::open(&ani_file)?;
+    let reader = BufReader::new(infile);
+    let mut ani_by_name = HashMap::new();
+
+    for line in reader.lines().skip(1) {
+        let line = line?;
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() < 3 {
+            continue;
+        }
+
+        let bin1 = ani_bin_name(fields[0]);
+        let bin2 = ani_bin_name(fields[1]);
+        let ani = fields[2].parse::<f32>().unwrap_or(0.0);
+        let key = ordered_name_pair(bin1, bin2);
+        ani_by_name.insert(key, ani);
+    }
+
+    Ok(ani_by_name)
+}
+
+fn ani_bin_name(value: &str) -> String {
+    Path::new(value)
+        .file_stem()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| strip_bin_extension(value).to_string())
+}
+
+fn lookup_ani_by_name(
+    bin1: &str,
+    bin2: &str,
+    ani_by_name: &HashMap<(String, String), f32>,
+) -> Option<f32> {
+    ani_by_name
+        .get(&ordered_name_pair(bin1.to_string(), bin2.to_string()))
+        .copied()
+}
+
+fn ordered_name_pair(bin1: String, bin2: String) -> (String, String) {
+    if bin1 <= bin2 {
+        (bin1, bin2)
+    } else {
+        (bin2, bin1)
+    }
+}
+
+fn process_remaining_bins(
+    args: &CustomDbArgs,
+    bindir: &PathBuf,
+    remaining_qualities: &HashMap<String, assess::BinQuality>,
+) -> io::Result<(HashSet<String>, HashMap<String, Vec<String>>)> {
+    let (graph, ani_details, id_to_name, id_to_node, af_ref, af_query) = merge::calc_ani(
+        bindir,
+        remaining_qualities,
+        &args.format,
+        args.anifile.clone(),
+        args.species_ani,
+        args.completeness_cutoff,
+        args.purity_cutoff,
+        args.species_alignedfrac,
+        true,
+        args.threads,
+    )?;
+
+    if args.sensitive {
+        info!("Selecting remaining-bin representatives based on high connectivity");
+        return Ok(mwids::select_highconnectivity_bins_with_memberships(
+            &graph,
+            &ani_details,
+            args.species_ani,
+            &id_to_name,
+            &id_to_node,
+            remaining_qualities,
+        ));
+    }
+
+    info!("Selecting remaining-bin representatives without reassembly");
+    let connected_bins = merge::get_connected_samples(
+        &graph,
+        &ani_details,
+        args.species_ani,
+        &id_to_name,
+        args.species_alignedfrac,
+        &af_ref,
+        &af_query,
+    );
+
+    let mut representative_bins = HashSet::new();
+    let mut member_to_rep = HashMap::new();
+
+    for component in connected_bins {
+        if let Some(rep) =
+            select_no_reassembly_rep(&component, remaining_qualities, args.completeness_cutoff)
+        {
+            representative_bins.insert(rep.clone());
+            for member in component {
+                member_to_rep.insert(member, rep.clone());
+            }
+        }
+    }
+
+    Ok((
+        representative_bins,
+        utility::rep_members_from_member_rep(&member_to_rep),
+    ))
+}
+
+fn select_no_reassembly_rep(
+    component: &HashSet<String>,
+    bin_qualities: &HashMap<String, assess::BinQuality>,
+    completeness_cutoff: f32,
+) -> Option<String> {
+    if component.len() == 1 {
+        let binname = component.iter().next()?;
+        let quality = bin_qualities.get(binname)?;
+        if quality.completeness >= completeness_cutoff {
+            return Some(binname.clone());
+        }
+        return None;
+    }
+
+    let high_quality_bins = component
+        .iter()
+        .filter(|bin| {
+            bin_qualities
+                .get(*bin)
+                .map(|quality| quality.completeness > 90.0)
+                .unwrap_or(false)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if let Some(rep) = select_best_quality_bin(&high_quality_bins, bin_qualities) {
+        return Some(rep);
+    }
+
+    reassemble::find_bestqualitybin(component, bin_qualities, completeness_cutoff)
+        .map(|(bin_name, _, _)| bin_name)
+}
+
+fn merge_memberships(
+    memberships_map: &mut HashMap<String, Vec<String>>,
+    additional_memberships: HashMap<String, Vec<String>>,
+) {
+    for (rep, members) in additional_memberships {
+        memberships_map.entry(rep).or_default().extend(members);
+    }
+}
+
+fn copy_representative_bins(
+    representative_bins: &HashSet<String>,
+    bindir: &Path,
+    output_dir: &Path,
+    format: &str,
+) -> io::Result<()> {
+    for bin in representative_bins {
+        let bin_path = bindir.join(format!("{}.{}", bin, format));
+        let final_path = output_dir.join(format!("{}.{}", bin, format));
+        if !final_path.exists() {
+            fs::copy(&bin_path, &final_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn write_quality_file(
+    representative_bins: &HashSet<String>,
+    bin_qualities: &HashMap<String, assess::BinQuality>,
+    output_dir: &Path,
+) -> io::Result<()> {
+    let output_file_path = output_dir.join("bins_checkm2_qualities.tsv");
+    let output_file = File::create(&output_file_path)?;
+    let mut writer = BufWriter::new(output_file);
+    let mut representatives: Vec<&String> = representative_bins.iter().collect();
+    representatives.sort_unstable();
+
+    writeln!(writer, "#Bin\tCompleteness\tContamination")?;
+    for bin in representatives {
+        if let Some(quality) = bin_qualities.get(bin) {
+            writeln!(
+                writer,
+                "{}\t{}\t{}",
+                bin, quality.completeness, quality.contamination
+            )?;
+        }
+    }
+    info!(
+        "Quality values of bins are written to {:?}",
+        output_file_path
+    );
     Ok(())
 }
 
@@ -203,15 +531,12 @@ fn customdb_output_dir(args: &CustomDbArgs, bindir: &PathBuf) -> PathBuf {
     args.output.clone().unwrap_or_else(|| {
         bindir
             .parent()
-            .map(|parent| parent.join("customdb_results"))
-            .unwrap_or_else(|| bindir.join("customdb_results"))
+            .map(|parent| parent.join("specieslevel_customdb"))
+            .unwrap_or_else(|| bindir.join("specieslevel_customdb"))
     })
 }
 
-fn group_perfect_bins_by_species(
-    perfect_bins: &PerfectGtdbBins,
-    bin_qualities: &HashMap<String, assess::BinQuality>,
-) -> HashMap<String, Vec<String>> {
+fn group_bins_by_species(perfect_bins: &PerfectGtdbBins) -> HashMap<String, Vec<String>> {
     let mut species_bins: HashMap<String, Vec<String>> = HashMap::new();
 
     for (bin, species) in perfect_bins {
@@ -220,6 +545,19 @@ fn group_perfect_bins_by_species(
             .or_default()
             .push(bin.clone());
     }
+
+    for bins in species_bins.values_mut() {
+        bins.sort_unstable();
+    }
+
+    species_bins
+}
+
+fn group_perfect_bins_by_species(
+    perfect_bins: &PerfectGtdbBins,
+    bin_qualities: &HashMap<String, assess::BinQuality>,
+) -> HashMap<String, Vec<String>> {
+    let mut species_bins = group_bins_by_species(perfect_bins);
 
     let mut memberships_map = HashMap::new();
     for bins in species_bins.values_mut() {
@@ -316,6 +654,7 @@ pub type PerfectGtdbBins = HashMap<String, String>;
 pub struct GtdbBins {
     pub perfect: PerfectGtdbBins,
     pub remaining: Vec<String>,
+    pub sp_aniradius: HashMap<String, f32>,
 }
 
 fn normalize_af_cutoff(alignedfrac: f32) -> f32 {
@@ -334,6 +673,7 @@ fn parse_gtdbtk_summary(
 ) -> io::Result<GtdbBins> {
     const COL_GENOME: usize = 0;
     const COL_CLASSIF: usize = 1;
+    const COL_ANIRAD: usize = 3;
     const COL_CANI: usize = 5;
     const COL_CAF: usize = 6;
 
@@ -341,6 +681,7 @@ fn parse_gtdbtk_summary(
     let reader = BufReader::new(infile);
     let mut perfect = HashMap::new();
     let mut remaining = Vec::new();
+    let mut sp_aniradius = HashMap::new();
     let af_species = normalize_af_cutoff(af_species);
 
     for (line_number, line) in reader.lines().enumerate() {
@@ -375,10 +716,22 @@ fn parse_gtdbtk_summary(
         let closest_ani = parse_float(fields[COL_CANI]);
         let closest_af = normalize_af_cutoff(parse_float(fields[COL_CAF]));
         let species = assigned_species(classification);
+        let species_ani_radius = parse_float(fields[COL_ANIRAD]);
+        let species_ani_radius = if species_ani_radius >= 0.0 {
+            species_ani_radius
+        } else {
+            ani_species
+        };
 
+        if let Some(species) = species {
+            sp_aniradius.insert(species.to_string(), species_ani_radius);
+        }
         // checks if the bin meets GTDB-Tk species-level criteria:
-        // ANI >= 95% and aligned fraction >= 50% with an assigned species name
-        if closest_ani >= ani_species && closest_af >= af_species {
+        // ANI >= species cutoff, ANI >= GTDB-Tk species ANI radius, and aligned fraction >= cutoff
+        if closest_ani >= ani_species
+            && closest_ani >= species_ani_radius
+            && closest_af >= af_species
+        {
             if let Some(species) = species {
                 perfect.insert(genome_name.to_string(), species.to_string());
                 continue;
@@ -387,7 +740,11 @@ fn parse_gtdbtk_summary(
         remaining.push(genome_name.to_string());
     }
 
-    Ok(GtdbBins { perfect, remaining })
+    Ok(GtdbBins {
+        perfect,
+        remaining,
+        sp_aniradius,
+    })
 }
 
 fn strip_bin_extension(bin: &str) -> &str {

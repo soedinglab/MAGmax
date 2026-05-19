@@ -53,6 +53,28 @@ pub fn select_highconnectivity_bins(
     bin_qualities: &HashMap<String, BinQuality>,
     result_dir: &Path,
 ) -> HashSet<String> {
+    let (rep_set, rep_members) = select_highconnectivity_bins_with_memberships(
+        graph,
+        ani_details,
+        ani_cutoff,
+        id_to_name,
+        id_to_node,
+        bin_qualities,
+    );
+
+    let _ = utility::write_membership_file(&rep_members, &result_dir.join("memberships.tsv"));
+    let _ = write_quality_file(&rep_set, bin_qualities, result_dir);
+    rep_set
+}
+
+pub fn select_highconnectivity_bins_with_memberships(
+    graph: &Graph<u32, (), Undirected>,
+    ani_details: &HashMap<(u32, u32), f32>,
+    ani_cutoff: f32,
+    id_to_name: &[String],
+    id_to_node: &HashMap<u32, NodeIndex>,
+    bin_qualities: &HashMap<String, BinQuality>,
+) -> (HashSet<String>, HashMap<String, Vec<String>>) {
     let connected_components = merge::compute_connected_components(&graph);
 
     let node_degrees: HashMap<u32, f32> = weighted_degree(&graph, &ani_details, ani_cutoff);
@@ -139,16 +161,14 @@ pub fn select_highconnectivity_bins(
         }
     }
 
-    let _ = write_membershipfile(&assigned_rep, id_to_name, bin_qualities, result_dir);
-    rep_set
+    let rep_members = rep_members_from_assigned(&assigned_rep, id_to_name);
+    (rep_set, rep_members)
 }
 
-fn write_membershipfile(
-    assigned_rep: &HashMap<u32, u32>, // node_id -> rep_id
+fn rep_members_from_assigned(
+    assigned_rep: &HashMap<u32, u32>,
     id_to_name: &[String],
-    bin_qualities: &HashMap<String, BinQuality>,
-    result_dir: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> HashMap<String, Vec<String>> {
     let mut rep_members: HashMap<String, Vec<String>> = HashMap::new();
     for (&member_id, &rep_id) in assigned_rep {
         let rep_name = id_to_name[rep_id as usize].clone();
@@ -158,16 +178,22 @@ fn write_membershipfile(
             rep_members.entry(rep_name).or_default().push(member_name);
         }
     }
-    utility::write_membership_file(&rep_members, &result_dir.join("memberships.tsv"))?;
+    rep_members
+}
 
+fn write_quality_file(
+    rep_set: &HashSet<String>,
+    bin_qualities: &HashMap<String, BinQuality>,
+    result_dir: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let output_file_path = result_dir.join("bins_checkm2_qualities.tsv");
     let output_file = File::create(&output_file_path)?;
     let mut writer = BufWriter::new(output_file);
-    let unique_reps: HashSet<u32> = assigned_rep.values().copied().collect();
+    let mut reps: Vec<&String> = rep_set.iter().collect();
+    reps.sort_unstable();
 
     writeln!(writer, "#Bin\tCompleteness\tContamination")?;
-    for &rep_id in unique_reps.iter() {
-        let rep_name = &id_to_name[rep_id as usize];
+    for rep_name in reps {
         if let Some(quality) = bin_qualities.get(rep_name) {
             writeln!(
                 writer,
