@@ -1,124 +1,189 @@
+use assess::BinQuality;
+use clap::{Parser, Subcommand};
+use log::{debug, error, info, warn};
+use rayon::prelude::*;
+use rayon::ThreadPoolBuilder;
+use readfetch::fetch_fastqreads;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self};
 use std::io::{self, stderr, Write};
 use std::path::PathBuf;
 use std::process::exit;
-use assess::BinQuality;
-use clap::Parser;
-use rayon::prelude::*;
-use rayon::ThreadPoolBuilder;
-use log::{debug, error, info, warn};
 use std::sync::{Arc, Mutex};
-use readfetch::fetch_fastqreads;
 
-mod utility;
 mod assess;
+mod cliques;
+mod customdb;
 mod merge;
 mod mwids;
-mod cliques;
 mod readfetch;
 mod reassemble;
+mod utility;
 
 // check for valid input paths
 fn validate_paths(cli: &Cli) -> io::Result<(PathBuf, PathBuf, PathBuf)> {
-    let bindir = utility::validate_path(
-        Some(&cli.bindir), "bindir", &cli.format);
+    let bindir = utility::validate_path(cli.bindir.as_ref(), "bindir", &cli.format);
 
     if cli.no_reassembly || cli.sensitive {
         Ok((bindir.to_path_buf(), PathBuf::new(), PathBuf::new()))
     } else {
-        let mapdir = utility::validate_path(
-            cli.mapdir.as_ref(), "mapdir", "_mapids");
-        let readdir = utility::validate_path(
-            cli.readdir.as_ref(), "readdir", ".fastq");
-        Ok((bindir.to_path_buf(), mapdir.to_path_buf(), readdir.to_path_buf()))
+        let mapdir = utility::validate_path(cli.mapdir.as_ref(), "mapdir", "_mapids");
+        let readdir = utility::validate_path(cli.readdir.as_ref(), "readdir", ".fastq");
+        Ok((
+            bindir.to_path_buf(),
+            mapdir.to_path_buf(),
+            readdir.to_path_buf(),
+        ))
     }
+}
 
+#[derive(Subcommand)]
+enum Commands {
+    #[command(name = "customedb", alias = "customdb")]
+    Customedb(customdb::CustomDbArgs),
 }
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
     /// Directory containing fasta files of bins
-    #[arg(short = 'b', long = "bindir", help = "Directory containing fasta files of bins")]
-    bindir: PathBuf,
+    #[arg(
+        short = 'b',
+        long = "bindir",
+        help = "Directory containing fasta files of bins"
+    )]
+    bindir: Option<PathBuf>,
 
     /// Directory containing read files
-    #[arg(short = 'r', long = "readdir", help = "Directory containing read files",
-        requires_if("false", "no_reassembly"))]
+    #[arg(
+        short = 'r',
+        long = "readdir",
+        help = "Directory containing read files",
+        requires_if("false", "no_reassembly")
+    )]
     readdir: Option<PathBuf>,
 
     /// Directory containing mapids files derived from alignment sam/bam files
-    #[arg(short = 'm', long = "mapdir", help = "Directory containing mapids files",
-        requires_if("false", "no_reassembly"))]
+    #[arg(
+        short = 'm',
+        long = "mapdir",
+        help = "Directory containing mapids files",
+        requires_if("false", "no_reassembly")
+    )]
     mapdir: Option<PathBuf>,
 
     /// Average Nucleotide Identity cutoff
-    #[arg(short = 'i', long = "ani", default_value_t = 99.0, help = "ANI for clustering bins (%)")]
+    #[arg(
+        short = 'i',
+        long = "ani",
+        default_value_t = 99.0,
+        help = "ANI for clustering bins (%)"
+    )]
     ani: f32,
 
     /// Completeness
-    #[arg(short = 'c', long = "completeness", default_value_t = 50.0,
-        help = "Minimum completeness of bins (%)")]
+    #[arg(
+        short = 'c',
+        long = "completeness",
+        default_value_t = 50.0,
+        help = "Minimum completeness of bins (%)"
+    )]
     completeness_cutoff: f32,
 
     /// Purity
-    #[arg(short = 'p', long = "purity", default_value_t = 95.0,
-        help = "Mininum purity (1- contamination) of bins (%)")]
+    #[arg(
+        short = 'p',
+        long = "purity",
+        default_value_t = 95.0,
+        help = "Mininum purity (1- contamination) of bins (%)"
+    )]
     purity_cutoff: f32,
-    
+
     /// Alignment fraction covered
-    #[arg(short = 'a', long = "alignedfrac", default_value_t = 0.0,
-        help = "Mininum aligned fraction of (both reference and query) genomes covered in the ANI calculation")]
+    #[arg(
+        short = 'a',
+        long = "alignedfrac",
+        default_value_t = 0.0,
+        help = "Mininum aligned fraction of (both reference and query) genomes covered in the ANI calculation"
+    )]
     alignedfrac: f32,
 
     /// Bin file extension
-    #[arg(short = 'f', long = "format", default_value = "fasta", help = "Bin file extension")]
+    #[arg(
+        short = 'f',
+        long = "format",
+        default_value = "fasta",
+        help = "Bin file extension"
+    )]
     format: String,
 
     /// Number of threads to use
-    #[arg(short = 't', long = "threads", default_value_t = 8, help = "Number of threads to use")]
+    #[arg(
+        short = 't',
+        long = "threads",
+        default_value_t = 8,
+        help = "Number of threads to use"
+    )]
     threads: usize,
-    
+
     /// Disable reassembly step
     #[arg(long = "no-reassembly", help = "Perform dereplication without bin merging and reassembly",
         conflicts_with_all = ["readdir", "mapdir"])]
     no_reassembly: bool,
 
-     /// Select representatives based on high connectivity
+    /// Select representatives based on high connectivity
     #[arg(long = "sensitive",
         help = "Select representatives based on high connectivity. Bin merging and reassembly steps are disabled",
         conflicts_with_all = ["readdir", "mapdir"])]
     sensitive: bool,
 
     /// First split bins before merging (if provided, set to true)
-    #[arg(long = "split", help = "Split clusters into sample-wise bins before processing")]
+    #[arg(
+        long = "split",
+        help = "Split clusters into sample-wise bins before processing"
+    )]
     split: bool,
-        
+
     /// CheckM2 quality file
-    #[arg(short = 'q', long = "qual", help = "Quality file produced by CheckM2 (quality_report.tsv)")]
+    #[arg(
+        short = 'q',
+        long = "qual",
+        help = "Quality file produced by CheckM2 (quality_report.tsv)"
+    )]
     qual: Option<PathBuf>,
 
     /// ANI file
-    #[arg(long = "anifile",
-    help = "ANI file produced by skani using command: skani triangle <bindir> -E -o <anifile>")]
+    #[arg(
+        long = "anifile",
+        help = "ANI file produced by skani using command: skani triangle <bindir> -E -o <anifile>"
+    )]
     anifile: Option<PathBuf>,
-    
+
     /// Directory of output
     #[arg(short = 'o', long = "outdir", help = "Directory of output")]
     output: Option<PathBuf>,
 
     /// Assembler choice
-    #[arg(long = "assembler", default_value = "spades",
-        help = "Assembler choice for reassembly step (spades|megahit), spades is recommended")]
+    #[arg(
+        long = "assembler",
+        default_value = "spades",
+        help = "Assembler choice for reassembly step (spades|megahit), spades is recommended"
+    )]
     assembler: String,
-
 }
 
 fn main() -> io::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let cli = Cli::parse();
 
+    if let Some(command) = cli.command {
+        return match command {
+            Commands::Customedb(args) => customdb::run(&args),
+        };
+    }
     // Parse arguments
     let (mut bindir, mapdir, readdir) = validate_paths(&cli)?;
     let ani_cutoff = cli.ani;
@@ -134,15 +199,16 @@ fn main() -> io::Result<()> {
     let anifile = cli.anifile;
     let mut no_reassembly = cli.no_reassembly;
     let sensitive = cli.sensitive;
-    let parentdir = bindir.parent().map(PathBuf::from).unwrap_or_else(|| bindir.clone());
-    
+    let parentdir = bindir
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| bindir.clone());
+
     // Output directory
     // eg: resultspath = <parentpathof_bindir>/mags_90comp_95purity/
-    let resultdir: PathBuf = parentdir
-        .join(format!(
+    let resultdir: PathBuf = parentdir.join(format!(
         "mags_{}comp_{}purity",
-        completeness_cutoff as u32,
-        purity_cutoff as u32
+        completeness_cutoff as u32, purity_cutoff as u32
     ));
 
     let resultdir = if let Some(output_path) = &cli.output {
@@ -150,26 +216,31 @@ fn main() -> io::Result<()> {
     } else {
         resultdir
     };
-    
+
     info!("Starting MAGmax with parameters:");
     info!("  🔹 Bins Directory: {:?}", bindir);
     info!("  🔹 ANI Cutoff: {:.2}%", ani_cutoff);
     info!("  🔹 Completeness Cutoff: {:.1}%", completeness_cutoff);
-    info!("  🔹 Purity/Contamination: {:.1}%/{:.1}%", purity_cutoff, contamination_cutoff);
+    info!(
+        "  🔹 Purity/Contamination: {:.1}%/{:.1}%",
+        purity_cutoff, contamination_cutoff
+    );
     if alignedfrac > 0.0 {
         info!("  🔹 Aligned fraction cutoff: {:.1}%", alignedfrac);
     }
     info!("  🔹 File Format: {}", format);
     info!("  🔹 Threads: {}", threads);
     info!("  🔹 Output Directory: {:?}", resultdir);
-    
+
     if !no_reassembly {
         info!("  🔹 Map Directory: {:?}", mapdir);
         info!("  🔹 Read Directory: {:?}", readdir);
         info!("  🔹 Assembler: {}", assembler);
         if !["spades", "megahit"].contains(&assembler.as_str()) {
-            error!("Error: Invalid assembler choice '{}'. Allowed options: 'spades' or 'megahit'.",
-                assembler);
+            error!(
+                "Error: Invalid assembler choice '{}'. Allowed options: 'spades' or 'megahit'.",
+                assembler
+            );
             exit(1);
         }
     }
@@ -178,12 +249,14 @@ fn main() -> io::Result<()> {
         no_reassembly = true;
         info!("  🔸 MAGmax runs in --sensitive mode which selects representatives based on high connectivity");
     } else {
-        if no_reassembly{
-            info!("  🔸 MAGmax runs dereplication of input bins without bin merging and reassembly");
+        if no_reassembly {
+            info!(
+                "  🔸 MAGmax runs dereplication of input bins without bin merging and reassembly"
+            );
         }
     }
 
-    let binfiles = utility::get_binfiles(&bindir,&format)?;
+    let binfiles = utility::get_binfiles(&bindir, &format)?;
     if binfiles.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -191,13 +264,13 @@ fn main() -> io::Result<()> {
             Please provide the correct format argument.",
         ));
     }
-   
+
     if resultdir.exists() {
         info!("Output folder: {:?} already exist. Cleaning it", &resultdir);
         fs::remove_dir_all(&resultdir)?;
     }
     fs::create_dir(&resultdir)?;
-    
+
     let pool = ThreadPoolBuilder::new()
         .num_threads(threads)
         .build()
@@ -205,40 +278,7 @@ fn main() -> io::Result<()> {
 
     // Split bin by sample id
     if split {
-        // Create a directory to store sample-wise bins
-        let samplewisebinspath: PathBuf = parentdir
-            .join("samplewisebins");
-        if samplewisebinspath.exists() {
-            fs::remove_dir_all(&samplewisebinspath)?;
-        }
-        fs::create_dir(&samplewisebinspath)?;
-
-        pool.install(|| {
-        binfiles.par_iter()
-            .filter_map(|bin| bin.canonicalize().ok())
-            .filter(|bin| {
-                if bin.exists() {
-                    true
-                } else {
-                    error!("Bin file does not exist: {:?}", bin);
-                    false
-                }
-            })
-            .for_each(|bin| {
-                // eg: bin_name = bin_1 (input: <bindir>/bin_1.fa)
-                let bin_name = bin.file_stem()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or_default();
-                utility::splitbysampleid(
-                    &bin,
-                    bin_name,
-                    &samplewisebinspath,
-                    &format)
-                .ok();
-            });
-        });
-        bindir = samplewisebinspath;
-        info!("splitting bins by sample {:?} is completed", bindir);
+        bindir = utility::split_bins_by_sample(&parentdir, &binfiles, &format, &pool)?;
     }
 
     // Get sample list
@@ -247,17 +287,23 @@ fn main() -> io::Result<()> {
     } else {
         utility::get_sample_names(&bindir, &format)?
     };
-    
+
     let is_paired: bool = utility::check_paired_reads(&readdir);
 
     if !no_reassembly {
-        let sample_count= bin_sample_map.values().collect::<HashSet<_>>().len();
-        info!("{:?} bin files and {:?} samples found", binfiles.len(), sample_count);
+        let sample_count = bin_sample_map.values().collect::<HashSet<_>>().len();
+        info!(
+            "{:?} bin files and {:?} samples found",
+            binfiles.len(),
+            sample_count
+        );
         if is_paired {
-            info!("Detected paired end \
+            info!(
+                "Detected paired end \
             reads in separate files as \
             <sampleid>_1.fastq \
-            and <sampleid>_2.fastq.")
+            and <sampleid>_2.fastq."
+            )
         } else {
             info!("Detected single-end reads as <sampleid>.fastq.")
         }
@@ -265,39 +311,31 @@ fn main() -> io::Result<()> {
 
     // Obtain quality of bins
     // eg: checkm2_outputpath = <parentpathof_bindir>/mags_90comp_95purity/checkm2_results/
-    let checkm2_outputpath: PathBuf = resultdir
-        .join("checkm2_results");
+    let checkm2_outputpath: PathBuf = resultdir.join("checkm2_results");
 
     let checkm2_qualities = if let Some(qual_path) = &qual {
         // User have alredy provided CheckM2 quality file
-        if qual_path.is_file() && fs::metadata(qual_path)
-            .map(|m| m.len() > 0)
-            .unwrap_or(false) {
+        if qual_path.is_file()
+            && fs::metadata(qual_path)
+                .map(|m| m.len() > 0)
+                .unwrap_or(false)
+        {
             qual_path.clone()
         } else {
-            info!("Provided quality file {:?} is missing or empty. Running CheckM2...", qual_path);
-            assess::assess_bins(
-                &bindir,
-                &checkm2_outputpath,
-                threads,
-                &format
-            )
-            .expect("Failed to run CheckM2")
+            info!(
+                "Provided quality file {:?} is missing or empty. Running CheckM2...",
+                qual_path
+            );
+            assess::assess_bins(&bindir, &checkm2_outputpath, threads, &format)
+                .expect("Failed to run CheckM2")
         }
     } else {
-        assess::assess_bins(
-            &bindir,
-            &checkm2_outputpath,
-            threads,
-            &format
-        )
-        .expect("Failed to run CheckM2")
+        assess::assess_bins(&bindir, &checkm2_outputpath, threads, &format)
+            .expect("Failed to run CheckM2")
     };
 
     // Obtain bins quality and store in a hashmap
-    let mut bin_qualities = match assess::parse_bins_quality(
-        &checkm2_qualities,
-    ) {
+    let mut bin_qualities = match assess::parse_bins_quality(&checkm2_qualities) {
         Ok(quality) => quality,
         Err(_) => {
             error!(
@@ -313,43 +351,33 @@ fn main() -> io::Result<()> {
     if bin_qualities.len() == 0 {
         info!("Input {:?} does not have any high pure bins. Or if existing checkm2 result is empty, first remove them before running magmax", bindir);
         return Ok(());
-    }        
+    }
 
-    debug!("Bin qualities length before reassembly: {}", bin_qualities.len());
-    
-    let (graph,
-        ani_details,
-        id_to_name,
-        id_to_node,
-        af_ref, 
-        af_query,
-    ) = match merge::calc_ani(
-            &bindir,
-            &bin_qualities,
-            &format,
-            anifile,
-            ani_cutoff,
-            completeness_cutoff,
-            contamination_cutoff,
-            alignedfrac,
-            no_reassembly,
-            threads,
-        ) {
-        Ok((graph,
-            ani_details,
-            id_to_name,
-            id_to_node,
-            af_ref,
-            af_query)
-        ) => {
+    debug!(
+        "Bin qualities length before reassembly: {}",
+        bin_qualities.len()
+    );
+
+    let (graph, ani_details, id_to_name, id_to_node, af_ref, af_query) = match merge::calc_ani(
+        &bindir,
+        &bin_qualities,
+        &format,
+        anifile,
+        ani_cutoff,
+        completeness_cutoff,
+        contamination_cutoff,
+        alignedfrac,
+        no_reassembly,
+        threads,
+    ) {
+        Ok((graph, ani_details, id_to_name, id_to_node, af_ref, af_query)) => {
             (graph, ani_details, id_to_name, id_to_node, af_ref, af_query)
-        },
+        }
         Err(e) => {
             error!("Error calculating ANI: {}", e);
             return Ok(());
         }
     };
-    
 
     if sensitive {
         info!("Selecting representatives based on high connectivity");
@@ -367,10 +395,13 @@ fn main() -> io::Result<()> {
             let bin_path = bindir.join(format!("{}.{}", bin, format));
             let final_path = resultdir.join(format!("{}.{}", bin, format));
             if let Err(e) = fs::copy(&bin_path, &final_path) {
-                error!("Failed to copy from {:?} to {:?}: {}", bin_path, final_path, e);
+                error!(
+                    "Failed to copy from {:?} to {:?}: {}",
+                    bin_path, final_path, e
+                );
             }
         }
-        info!("MAGmax is successfully completed!");  
+        info!("MAGmax is successfully completed!");
         return Ok(());
     }
 
@@ -382,96 +413,91 @@ fn main() -> io::Result<()> {
         &id_to_name,
         alignedfrac,
         &af_ref,
-        &af_query
+        &af_query,
     );
-    
+
     // Collect completeness and purity of merged and reassembled bins
-    let merged_bin_qualities: Arc<Mutex<HashMap<String, BinQuality>>> = 
+    let merged_bin_qualities: Arc<Mutex<HashMap<String, BinQuality>>> =
         Arc::new(Mutex::new(HashMap::new()));
 
     // Collect membership for each representative (member -> representative)
-    let memberships_map: Arc<Mutex<HashMap<String, String>>> = 
-        Arc::new(Mutex::new(HashMap::new()));
+    let memberships_map: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
 
     if !no_reassembly {
         pool.install(|| {
-        connected_bins
-        .par_iter()
-        .enumerate()
-        .try_for_each(|(id, component)| {
-            // Flush stderr once before processing starts
-            stderr().flush().ok();
+            connected_bins
+                .par_iter()
+                .enumerate()
+                .try_for_each(|(id, component)| {
+                    // Flush stderr once before processing starts
+                    stderr().flush().ok();
 
-            let merged_bin_quality = 
-                Arc::clone(&merged_bin_qualities);
-            let memberships_map = 
-                Arc::clone(&memberships_map);
+                    let merged_bin_quality = Arc::clone(&merged_bin_qualities);
+                    let memberships_map = Arc::clone(&memberships_map);
 
-            // Process each connected component
-            process_components_reassemble(
-                &component,
-                &bindir,
-                &mapdir,
-                &readdir,
-                &resultdir,
-                &bin_sample_map,
-                &format,
-                &bin_qualities,
-                &merged_bin_quality,
-                &assembler,
-                completeness_cutoff,
-                contamination_cutoff,
-                is_paired,
-                &memberships_map,
-                id,
-            )
-            .map_err(|e| {
-                error!("Error processing bin {:?}: {}", component, e);
-                e
-            })
-        })
-        .expect("Error during processing components");
+                    // Process each connected component
+                    process_components_reassemble(
+                        &component,
+                        &bindir,
+                        &mapdir,
+                        &readdir,
+                        &resultdir,
+                        &bin_sample_map,
+                        &format,
+                        &bin_qualities,
+                        &merged_bin_quality,
+                        &assembler,
+                        completeness_cutoff,
+                        contamination_cutoff,
+                        is_paired,
+                        &memberships_map,
+                        id,
+                    )
+                    .map_err(|e| {
+                        error!("Error processing bin {:?}: {}", component, e);
+                        e
+                    })
+                })
+                .expect("Error during processing components");
         });
     } else {
         pool.install(|| {
-        connected_bins
-        .par_iter()
-        .enumerate()
-        .try_for_each(|(id, component)| {
-            // Flush stderr once before processing starts
-            stderr().flush().ok();
-            
-            let memberships_map = Arc::clone(&memberships_map);
-            // Process each connected component
-            process_components(
-                &component,
-                &bindir,
-                &resultdir,
-                &format,
-                &bin_qualities,
-                completeness_cutoff,
-                &memberships_map,
-                id,
-            )
-            .map_err(|e| {
-                error!("Error processing bin {:?}: {}", component, e);
-                e
-            })
-        })
-        .expect("Error during processing components");
+            connected_bins
+                .par_iter()
+                .enumerate()
+                .try_for_each(|(id, component)| {
+                    // Flush stderr once before processing starts
+                    stderr().flush().ok();
+
+                    let memberships_map = Arc::clone(&memberships_map);
+                    // Process each connected component
+                    process_components(
+                        &component,
+                        &bindir,
+                        &resultdir,
+                        &format,
+                        &bin_qualities,
+                        completeness_cutoff,
+                        &memberships_map,
+                        id,
+                    )
+                    .map_err(|e| {
+                        error!("Error processing bin {:?}: {}", component, e);
+                        e
+                    })
+                })
+                .expect("Error during processing components");
         });
     }
-    
+
     if !no_reassembly {
         {
-            let merged_bin_qualities = 
-            merged_bin_qualities.lock().unwrap();
-    
+            let merged_bin_qualities = merged_bin_qualities.lock().unwrap();
+
             for (key, value) in merged_bin_qualities.iter() {
                 bin_qualities.insert(key.to_string(), value.clone());
             }
         }
-    
     }
 
     // Final dereplication using skani
@@ -490,12 +516,11 @@ fn main() -> io::Result<()> {
         &memberships_map,
         &format,
     );
-       
-    info!("MAGmax is successfully completed!");  
+
+    info!("MAGmax is successfully completed!");
 
     Ok(())
 }
-
 
 /// Process cluster in parallel
 fn process_components(
@@ -508,7 +533,6 @@ fn process_components(
     memberships_map: &Arc<Mutex<HashMap<String, String>>>,
     id: usize,
 ) -> io::Result<()> {
-
     // eg: comp = {"binname_S1", "binname_S2"}
 
     // Singleton cluster, save the bin in the output
@@ -519,7 +543,10 @@ fn process_components(
                 let bin_path = bindir.join(format!("{}.{}", binname, format));
                 let final_path = resultdir.join(format!("{}.{}", binname, format));
                 if let Err(e) = fs::copy(&bin_path, &final_path) {
-                    error!("Failed to copy from {:?} to {:?}: {}", bin_path, final_path, e);
+                    error!(
+                        "Failed to copy from {:?} to {:?}: {}",
+                        bin_path, final_path, e
+                    );
                 }
                 utility::assign_members(component, &binname, memberships_map);
             }
@@ -529,26 +556,21 @@ fn process_components(
     debug!("Processing component ID: {}, bins: {:?}", id, component);
 
     // Check if the cluster has already a high-quality bin (>90% comp, <5% cont)
-    if let Some(binname) = assess::check_high_quality_bin(
-        &component, &bin_qualities, bindir, resultdir, &format) {
-            utility::assign_members(component, &binname, memberships_map);
+    if let Some(binname) =
+        assess::check_high_quality_bin(&component, &bin_qualities, bindir, resultdir, &format)
+    {
+        utility::assign_members(component, &binname, memberships_map);
         return Ok(());
     } // edit here to select representative based on connectivity
 
-    let selected_bin = 
-        reassemble::find_bestqualitybin(
-            component,
-            bin_qualities,
-            completeness_cutoff
-        )
-        .map(|(bin_name, _, _)| bin_name);
+    let selected_bin =
+        reassemble::find_bestqualitybin(component, bin_qualities, completeness_cutoff)
+            .map(|(bin_name, _, _)| bin_name);
 
-
-    if let Some(binname) = reassemble::select_bestqualitybin(
-        selected_bin,
-        bindir,
-        resultdir,
-        format) { // edit here to select representative based on connectivity
+    if let Some(binname) =
+        reassemble::select_bestqualitybin(selected_bin, bindir, resultdir, format)
+    {
+        // edit here to select representative based on connectivity
         utility::assign_members(component, &binname, memberships_map);
     }
     return Ok(());
@@ -561,7 +583,7 @@ fn process_components_reassemble(
     mapdir: &PathBuf,
     readdir: &PathBuf,
     resultdir: &PathBuf,
-    bin_sample_map: &HashMap<String,String>,
+    bin_sample_map: &HashMap<String, String>,
     format: &str,
     bin_qualities: &HashMap<String, BinQuality>,
     merged_bin_quality: &Arc<Mutex<HashMap<String, BinQuality>>>,
@@ -572,7 +594,6 @@ fn process_components_reassemble(
     memberships_map: &Arc<Mutex<HashMap<String, String>>>,
     id: usize,
 ) -> io::Result<()> {
-    
     // eg: comp = {"binname_S1", "binname_S2"}
 
     // Singleton cluster, save the bin in the output
@@ -583,7 +604,10 @@ fn process_components_reassemble(
                 let bin_path = bindir.join(format!("{}.{}", binname, format));
                 let final_path = resultdir.join(format!("{}.{}", binname, format));
                 if let Err(e) = fs::copy(&bin_path, &final_path) {
-                    error!("Failed to copy from {:?} to {:?}: {}", bin_path, final_path, e);
+                    error!(
+                        "Failed to copy from {:?} to {:?}: {}",
+                        bin_path, final_path, e
+                    );
                 }
                 utility::assign_members(component, &binname, memberships_map);
             }
@@ -591,33 +615,23 @@ fn process_components_reassemble(
         return Ok(());
     }
     debug!("Processing component ID: {}, bins: {:?}", id, component);
-  
+
     // Check if the cluster has already a high-quality bin (>90% comp, <5% cont)
-    if let Some(binname) = 
-        assess::check_high_quality_bin(
-            &component,
-            &bin_qualities,
-            bindir,
-            resultdir,
-            format
-        ) {
+    if let Some(binname) =
+        assess::check_high_quality_bin(&component, &bin_qualities, bindir, resultdir, format)
+    {
         utility::assign_members(component, &binname, memberships_map);
         return Ok(());
     } // edit here to select representative based on connectivity
 
     // eg. selected_binset_path = <bindir>/0_combined/
-    let selected_binset_path = 
-        resultdir.join(format!("{}_combined", id));
+    let selected_binset_path = resultdir.join(format!("{}_combined", id));
     if selected_binset_path.exists() {
         fs::remove_dir_all(&selected_binset_path)?;
     }
     fs::create_dir(&selected_binset_path)?;
     // Merge bins within the cluster
-    merge::combine_fastabins(
-    &bindir,
-    &component,
-    &selected_binset_path,
-        format).map_err(|e| {
+    merge::combine_fastabins(&bindir, &component, &selected_binset_path, format).map_err(|e| {
         error!(
             "Error in combining combined bins for component {}: {}",
             id, e
@@ -627,48 +641,50 @@ fn process_components_reassemble(
 
     // (Obsolete) Enrich bins by adding contigs that are directly linked to bin in the assembly graph
     let all_enriched_scaffolds = utility::read_fasta(
-        &selected_binset_path.join("combined.fasta").to_string_lossy()
+        &selected_binset_path
+            .join("combined.fasta")
+            .to_string_lossy(),
     )?;
 
-    let scaffold_inputname:&str = "combined";
-
+    let scaffold_inputname: &str = "combined";
 
     // Collect reads mapped to contigs in the merged set
     for samplebin in component {
-        let sample = bin_sample_map.get(samplebin)
+        let sample = bin_sample_map
+            .get(samplebin)
             .unwrap_or_else(|| panic!("Error: File '{}' not found in map!", samplebin));
 
         let mapid_path = mapdir.join(format!("{}_mapids", sample));
         let mapid_file = utility::path_to_str(&mapid_path);
-                    
+
         let read_files: Vec<String> = if is_paired {
-            let read_path1 = utility::find_file_with_extension(
-                readdir, &format!("{}_1", sample));
-            let read_path2 = utility::find_file_with_extension(
-                readdir, &format!("{}_2", sample));
-    
+            let read_path1 = utility::find_file_with_extension(readdir, &format!("{}_1", sample));
+            let read_path2 = utility::find_file_with_extension(readdir, &format!("{}_2", sample));
+
             vec![
-                read_path1.to_str().expect(
-                    "Failed to convert PathBuf to &str").to_string(),
-                read_path2.to_str().expect(
-                    "Failed to convert PathBuf to &str").to_string()
+                read_path1
+                    .to_str()
+                    .expect("Failed to convert PathBuf to &str")
+                    .to_string(),
+                read_path2
+                    .to_str()
+                    .expect("Failed to convert PathBuf to &str")
+                    .to_string(),
             ]
         } else {
-            let read_path = utility::find_file_with_extension(
-                readdir, sample);
-            
-            vec![
-                read_path.to_str().expect(
-                "Failed to convert PathBuf to &str").to_string()
-            ]
+            let read_path = utility::find_file_with_extension(readdir, sample);
+
+            vec![read_path
+                .to_str()
+                .expect("Failed to convert PathBuf to &str")
+                .to_string()]
         };
-        
+
         let _ = fetch_fastqreads(
             &all_enriched_scaffolds,
             mapid_file,
             read_files,
-            selected_binset_path
-            .join(format!("{}.fasta", scaffold_inputname)),
+            selected_binset_path.join(format!("{}.fasta", scaffold_inputname)),
             is_paired,
         );
     }
@@ -709,7 +725,7 @@ fn process_components_reassemble(
     }
 
     info!("Reassembly is completed for component {}", id.to_string());
-    
+
     // clean folder
     if !cfg!(debug_assertions) {
         if let Err(e) = fs::remove_dir_all(&selected_binset_path) {
