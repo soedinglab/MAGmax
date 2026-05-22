@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::fs::{self, read_to_string, File};
+use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Write};
 use std::process::exit;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use dashmap::DashMap;
 use log::{error, info};
 use rayon::prelude::*;
