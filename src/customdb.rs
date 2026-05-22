@@ -222,6 +222,7 @@ pub fn run(args: &CustomDbArgs) -> io::Result<()> {
         group_perfect_bins_by_species(&perfect_bins, &bin_qualities, &isolate_genomes);
     write_gtdbtk_species_representatives(
         &memberships_map,
+        &sp_aniradius,
         &output_dir.join("gtdbtk_species_representatives.tsv"),
     )?;
     let mut representative_bins: HashSet<String> = memberships_map.keys().cloned().collect();
@@ -268,7 +269,7 @@ fn write_remaining_species_ani_report(
     remaining_reps: &HashSet<String>,
     memberships_map: &mut HashMap<String, Vec<String>>,
     representative_bins: &HashSet<String>,
-    sp_aniradius: &HashMap<String, f32>,
+    sp_aniradius: &HashMap<String, (f32, String)>,
     output_dir: &Path,
 ) -> io::Result<()> {
     if remaining_reps.is_empty() || representative_bins.is_empty() {
@@ -317,9 +318,10 @@ fn write_remaining_species_ani_report(
             };
             debug!(
                 "species ANI radius: {}",
-                sp_aniradius.get(*cluster_rep).copied().unwrap_or(0.0)
+                sp_aniradius.get(*cluster_rep).map(|(ani_radius, _)| ani_radius.to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
             );
-            if rep_ani < sp_aniradius.get(*cluster_rep).copied().unwrap_or(0.0) {
+            if rep_ani < sp_aniradius.get(*cluster_rep).map(|(ani_radius, _)| *ani_radius).unwrap_or(0.0) {
                 continue;
             }
             let key = ordered_name_pair(remaining_rep.clone(), (*cluster_rep).clone());
@@ -343,7 +345,7 @@ fn write_remaining_species_ani_report(
                     break;
                 };
 
-                if ani < sp_aniradius.get(member).copied().unwrap_or(0.0) {
+                if ani < sp_aniradius.get(member).map(|(ani_radius, _)| *ani_radius).unwrap_or(0.0) {
                     all_members_above_species_ani = false;
                     break;
                 }
@@ -364,7 +366,7 @@ fn write_remaining_species_ani_report(
                 remaining_rep,
                 cluster_rep,
                 rep_ani,
-                sp_aniradius.get(*cluster_rep).copied().unwrap_or(0.0),
+                sp_aniradius.get(*cluster_rep).map(|(ani_radius, _)| *ani_radius).unwrap_or(0.0),
                 all_members_above_species_ani,
             )?;
         }
@@ -633,6 +635,7 @@ fn merge_memberships(
 
 fn write_gtdbtk_species_representatives(
     memberships_map: &HashMap<String, Vec<String>>,
+    sp_aniradius: &HashMap<String, (f32, String)>,
     output_path: &Path,
 ) -> io::Result<()> {
     let output_file = File::create(output_path)?;
@@ -640,9 +643,13 @@ fn write_gtdbtk_species_representatives(
     let mut representatives: Vec<&String> = memberships_map.keys().collect();
     representatives.sort_unstable();
 
-    writeln!(writer, "#gtdbtk_species_representative")?;
+    writeln!(writer, "#gtdbtk_species_representative\tspecies_name")?;
     for rep in representatives {
-        writeln!(writer, "{}", rep)?;
+        let sp_name = sp_aniradius
+            .get(rep)
+            .map(|(_, classification)| classification.clone())
+            .unwrap_or_else(|| "unknown".to_string());
+        writeln!(writer, "{}\t{}", rep, sp_name)?;
     }
 
     info!(
@@ -876,7 +883,7 @@ pub type PerfectGtdbBins = HashMap<String, String>;
 pub struct GtdbBins {
     pub perfect: PerfectGtdbBins,
     pub remaining: Vec<String>,
-    pub sp_aniradius: HashMap<String, f32>,
+    pub sp_aniradius: HashMap<String, (f32, String)>,
 }
 
 fn normalize_af_cutoff(alignedfrac: f32) -> f32 {
@@ -946,7 +953,7 @@ fn parse_gtdbtk_summary(
         };
 
         if let Some(_) = species {
-            sp_aniradius.insert(genome_name.to_string(), species_ani_radius);
+            sp_aniradius.insert(genome_name.to_string(), (species_ani_radius, classification.to_string()));
         }
         // checks if the bin meets GTDB-Tk species-level criteria:
         // ANI >= species cutoff, ANI >= GTDB-Tk species ANI radius, and aligned fraction >= cutoff
