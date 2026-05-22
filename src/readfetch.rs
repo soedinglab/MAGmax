@@ -1,10 +1,12 @@
-use crate::utility;
-use log::error;
 use std::collections::HashSet;
+use std::process::{Command, Stdio};
+use std::path::PathBuf;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, Write};
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::thread;
+use flate2::read::GzDecoder;
+use crate::utility;
+use log::error;
 
 /// Read fastq file and collect reads mapped to contigs of merged bin
 pub fn fetch_fastqreads(
@@ -12,47 +14,19 @@ pub fn fetch_fastqreads(
     mapids: &str,
     fastq_files: Vec<String>,
     outputbin: PathBuf,
-    is_paired: bool,
+    is_paired: bool
 ) -> Result<(), Box<dyn std::error::Error>> {
+
+    let base = utility::get_output_binname(
+            outputbin.to_str().expect("Invalid UTF-8 in outputbin path"))
+        .to_str()
+        .expect("Invalid UTF-8 in output bin name")
+        .replace(".fasta", "");
+
     let output_fastq: Vec<String> = if is_paired {
-        let read_file1 = PathBuf::from(format!(
-            "{}",
-            utility::get_output_binname(outputbin.to_str().expect(""))
-                .to_str()
-                .expect("Invalid UTF-8 in file path")
-                .replace(".fasta", "_1.fastq")
-        ));
-        let read_file2 = PathBuf::from(format!(
-            "{}",
-            utility::get_output_binname(outputbin.to_str().expect(""))
-                .to_str()
-                .expect("Invalid UTF-8 in file path")
-                .replace(".fasta", "_2.fastq")
-        ));
-
-        vec![
-            read_file1
-                .to_str()
-                .expect("Failed to convert PathBuf to &str")
-                .to_string(),
-            read_file2
-                .to_str()
-                .expect("Failed to convert PathBuf to &str")
-                .to_string(),
-        ]
+        vec![format!("{}_1.fastq", base), format!("{}_2.fastq", base)]
     } else {
-        let read_file = PathBuf::from(format!(
-            "{}",
-            utility::get_output_binname(outputbin.to_str().expect(""))
-                .to_str()
-                .expect("Invalid UTF-8 in file path")
-                .replace(".fasta", ".fastq")
-        ));
-
-        vec![read_file
-            .to_str()
-            .expect("Failed to convert PathBuf to &str")
-            .to_string()]
+        vec![format!("{}.fastq", base)]
     };
 
     if let Err(e) = write_selected_reads(
@@ -60,7 +34,7 @@ pub fn fetch_fastqreads(
         enriched_scaffolds,
         mapids,
         &output_fastq,
-        is_paired,
+        is_paired
     ) {
         error!(" {}", e);
     };
@@ -94,7 +68,8 @@ fn write_selected_reads(
     let mfile = File::open(mapid_file)?;
     let mapid_reader = io::BufReader::new(mfile);
     let readid_file = format!("{}_readids", output_fastq[0].replace(".fastq", ""));
-    let mut idfile = io::BufWriter::new(File::create(&readid_file)?);
+    let mut idfile = io::BufWriter::new(
+        File::create(&readid_file)?);
     for line in mapid_reader.lines() {
         let line = line?;
         let parts: Vec<&str> = line.split_whitespace().collect();
@@ -110,8 +85,8 @@ fn write_selected_reads(
         if enriched_scaffolds.contains(scaffold_id) {
             writeln!(idfile, "{}", read_id)?;
         }
-        idfile.flush()?;
     }
+    idfile.flush()?;
 
     let mut outfile1 = OpenOptions::new()
         .create(true)
@@ -119,32 +94,51 @@ fn write_selected_reads(
         .open(&output_fastq[0])?;
 
     let mut outfile2 = if is_paired {
-        Some(
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&output_fastq[1])?,
-        )
+        Some(OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&output_fastq[1])?)
     } else {
         None
     };
 
-    // seqtk can't handle compressed files
     if which::which("seqtk").is_err() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "`seqtk` not found in PATH",
-        ));
+        return Err(io::Error::new(io::ErrorKind::NotFound, "`seqtk` not found in PATH"));
     }
-    let process_seqtk = |fastq: &String, outfile: &mut File| -> Result<(), io::Error> {
-        let mut child = Command::new("seqtk")
-            .arg("subseq")
-            .arg(fastq)
-            .arg(&readid_file)
-            .stdout(Stdio::piped())
-            .spawn()?;
+    let process_seqtk =
+        |fastq: &String, outfile: &mut File| -> Result<(), io::Error> {
+        if fastq.ends_with(".gz") {
+            // Decompress in a background thread piped to seqtk stdin to avoid
+            // deadlock between the stdin write and stdout read.
+            let mut child = Command::new("seqtk")
+                .arg("subseq")
+                .arg("-")
+                .arg(&readid_file)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()?;
 
-        io::copy(&mut child.stdout.take().unwrap(), outfile)?;
+            let fastq_path = fastq.clone();
+            let stdin = child.stdin.take().unwrap();
+            let writer = thread::spawn(move || -> io::Result<()> {
+                let mut decoder = GzDecoder::new(File::open(&fastq_path)?);
+                let mut w = io::BufWriter::new(stdin);
+                io::copy(&mut decoder, &mut w)?;
+                Ok(())
+            });
+
+            io::copy(&mut child.stdout.take().unwrap(), outfile)?;
+            writer.join().expect("gz writer thread panicked")?;
+            child.wait()?;
+        } else {
+            let mut child = Command::new("seqtk")
+                .arg("subseq")
+                .arg(fastq)
+                .arg(&readid_file)
+                .stdout(Stdio::piped())
+                .spawn()?;
+            io::copy(&mut child.stdout.take().unwrap(), outfile)?;
+        }
         Ok(())
     };
 

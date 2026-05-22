@@ -505,7 +505,7 @@ fn process_remaining_bins(
     isolate_genomes: &HashSet<String>,
 ) -> io::Result<(HashSet<String>, HashMap<String, Vec<String>>)> {
     let ani_file = get_remaining_ani_file(args, bindir, output_dir, representative_bins, remaining_qualities)?;
-    let (graph, ani_details, id_to_name, id_to_node, af_ref, af_query) = merge::calc_ani(
+    let (graph, ani_data, id_to_name, id_to_node) = merge::calc_ani(
         bindir,
         remaining_qualities,
         &args.format,
@@ -520,9 +520,13 @@ fn process_remaining_bins(
 
     if args.sensitive {
         info!("Selecting remaining-bin representatives based on high connectivity");
+        let ani_map: HashMap<(u32, u32), f32> = ani_data.iter()
+            .map(|(&k, v)| (k, v.ani))
+            .collect();
+
         return Ok(mwids::select_highconnectivity_bins_with_memberships(
             &graph,
-            &ani_details,
+            &ani_map,
             args.species_ani,
             &id_to_name,
             &id_to_node,
@@ -534,12 +538,10 @@ fn process_remaining_bins(
     info!("Selecting remaining-bin representatives without reassembly");
     let connected_bins = merge::get_connected_samples(
         &graph,
-        &ani_details,
+        &ani_data,
         args.species_ani,
         &id_to_name,
         args.species_alignedfrac,
-        &af_ref,
-        &af_query,
     );
 
     let mut representative_bins = HashSet::new();

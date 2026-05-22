@@ -1,25 +1,23 @@
-use petgraph::graph::Graph;
-use petgraph::graph::NodeIndex;
-use petgraph::Undirected;
-use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
+use petgraph::graph::{Graph};
+use petgraph::graph::NodeIndex;
+use petgraph::{Undirected};
+use rayon::prelude::*;
+use crate::merge::AniData;
 
 // Get clique clusters
 pub fn split_component_into_cliques(
     component: HashSet<u32>,
-    ani_details: &HashMap<(u32, u32), f32>,
+    ani_map: &HashMap<(u32, u32), AniData>,
     ani_cutoff: f32,
     aligned_frac: f32,
-    af_ref: &HashMap<(u32, u32), f32>,
-    af_query: &HashMap<(u32, u32), f32>,
 ) -> Vec<HashSet<u32>> {
+
     let adj = build_adj(
         &component,
-        ani_details,
+        ani_map,
         ani_cutoff,
         aligned_frac,
-        af_ref,
-        af_query,
     );
 
     let mut remaining = component;
@@ -30,14 +28,17 @@ pub fn split_component_into_cliques(
 
     // Split large components into cores to improve performance
     // It might miss some cliques spanning multiple cores
-    // but since we compare final clusters later, it should
+    // but since we compare final clusters later, it should 
     // not miss genomic pairs > ANI threshold and not influence the final results
     while remaining.len() > MAX_CLIQUE_CORE_SIZE {
-        let core = extract_core_chunk(&mut remaining, &adj, MAX_CLIQUE_CORE_SIZE);
+
+        let core = 
+            extract_core_chunk(&mut remaining, &adj, MAX_CLIQUE_CORE_SIZE);
         if core.len() <= 1 {
             // treat as singleton(s)
             subclusters.extend(core.into_iter().map(|id| HashSet::from([id])));
             continue;
+
         }
         cores.push(core);
     }
@@ -60,7 +61,7 @@ pub fn split_component_into_cliques(
                     .collect::<Vec<_>>() // returned from this closure
             })
             .collect();
-
+        
         let mut sorted_cliques: Vec<Vec<u32>> = all_cliques
             .into_iter()
             .map(|set| {
@@ -73,8 +74,8 @@ pub fn split_component_into_cliques(
         sorted_cliques.sort_unstable();
         subclusters.extend(
             sorted_cliques
-                .into_iter()
-                .map(|c| c.into_iter().collect::<HashSet<u32>>()),
+            .into_iter()
+            .map(|c| c.into_iter().collect::<HashSet<u32>>()),
         );
     }
 
@@ -82,7 +83,8 @@ pub fn split_component_into_cliques(
         if remaining.len() == 1 {
             subclusters.push(HashSet::from([*remaining.iter().next().unwrap()]));
         } else {
-            let subgraph = build_subgraph_for_ids(&remaining, &adj);
+            let subgraph = 
+                build_subgraph_for_ids(&remaining, &adj);
 
             let mut r: Vec<NodeIndex> = Vec::new();
             let mut p: Vec<NodeIndex> = subgraph.node_indices().collect();
@@ -91,19 +93,20 @@ pub fn split_component_into_cliques(
 
             bron_kerbosch(&subgraph, &mut r, &mut p, &mut x, &mut cliques_vec);
 
-            subclusters.extend(cliques_vec.into_iter().map(|c| c.into_iter().collect()));
+            subclusters.extend(
+                cliques_vec
+                .into_iter()
+                .map(|c| c.into_iter().collect()));
         }
     }
 
     let final_subclusters = connect_singletons_to_cliques(
         subclusters,
-        ani_details,
+        ani_map,
         ani_cutoff,
         aligned_frac,
-        af_ref,
-        af_query,
     );
-
+    
     final_subclusters
 }
 
@@ -120,33 +123,30 @@ fn bron_kerbosch(
         return;
     }
 
-    let pivot = p.iter().chain(x.iter()).next().copied().unwrap(); // Choose a pivot
-    let neighbors: HashSet<NodeIndex> = graph.neighbors(pivot).collect();
+    // Tomita pivot: pick u in P∪X maximising |N(u) ∩ P| to minimise recursive calls
+    let p_set: HashSet<NodeIndex> = p.iter().copied().collect();
+    let pivot = p
+        .iter()
+        .chain(x.iter())
+        .copied()
+        .max_by_key(|&u| graph.neighbors(u).filter(|n| p_set.contains(n)).count())
+        .unwrap();
+    let pivot_neighbors: HashSet<NodeIndex> = graph.neighbors(pivot).collect();
 
-    let mut candidates: Vec<NodeIndex> = Vec::new();
-
-    for &v in p.iter() {
-        if !neighbors.contains(&v) {
-            candidates.push(v);
-        }
-    }
+    // Only recurse on vertices not adjacent to the pivot
+    let candidates: Vec<NodeIndex> = p
+        .iter()
+        .copied()
+        .filter(|v| !pivot_neighbors.contains(v))
+        .collect();
 
     for v in candidates {
         r.push(v);
 
-        let mut p_next: Vec<NodeIndex> = Vec::new();
-
-        for &u in p.iter() {
-            if graph.contains_edge(v, u) {
-                p_next.push(u);
-            }
-        }
-        let mut x_next: Vec<NodeIndex> = Vec::new();
-        for &u in x.iter() {
-            if graph.contains_edge(v, u) {
-                x_next.push(u);
-            }
-        }
+        // Build v's neighbor set once — O(1) membership checks replace O(degree) contains_edge
+        let v_neighbors: HashSet<NodeIndex> = graph.neighbors(v).collect();
+        let mut p_next: Vec<NodeIndex> = p.iter().copied().filter(|u| v_neighbors.contains(u)).collect();
+        let mut x_next: Vec<NodeIndex> = x.iter().copied().filter(|u| v_neighbors.contains(u)).collect();
 
         bron_kerbosch(graph, r, &mut p_next, &mut x_next, cliques);
         r.pop();
@@ -160,37 +160,39 @@ fn bron_kerbosch(
 
 fn build_adj(
     component: &HashSet<u32>,
-    ani_details: &HashMap<(u32, u32), f32>,
+    ani_map: &HashMap<(u32, u32), AniData>,
     ani_cutoff: f32,
     aligned_frac: f32,
-    af_ref: &HashMap<(u32, u32), f32>,
-    af_query: &HashMap<(u32, u32), f32>,
 ) -> HashMap<u32, HashSet<u32>> {
     let mut adj: HashMap<u32, HashSet<u32>> = HashMap::new();
-
     for &id in component {
         adj.entry(id).or_default();
     }
 
     let ids: Vec<u32> = component.iter().copied().collect();
-    for i in 0..ids.len() {
-        for j in (i + 1)..ids.len() {
+
+    // Collect valid edges in parallel, then insert sequentially
+    let edges: Vec<(u32, u32)> = (0..ids.len())
+        .into_par_iter()
+        .flat_map(|i| {
             let id1 = ids[i];
-            let id2 = ids[j];
+            ((i + 1)..ids.len())
+                .filter_map(|j| {
+                    let id2 = ids[j];
+                    let key = if id1 <= id2 { (id1, id2) } else { (id2, id1) };
+                    let data = ani_map.get(&key)?;
+                    (data.ani >= ani_cutoff
+                        && data.af_ref >= aligned_frac
+                        && data.af_query >= aligned_frac)
+                        .then_some((id1, id2))
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
 
-            let key = if id1 <= id2 { (id1, id2) } else { (id2, id1) };
-
-            let Some(&ani) = ani_details.get(&key) else {
-                continue;
-            };
-            let af_r = af_ref.get(&key).copied().unwrap_or(0.0);
-            let af_q = af_query.get(&key).copied().unwrap_or(0.0);
-
-            if ani >= ani_cutoff && af_r >= aligned_frac && af_q >= aligned_frac {
-                adj.get_mut(&id1).unwrap().insert(id2);
-                adj.get_mut(&id2).unwrap().insert(id1);
-            }
-        }
+    for (id1, id2) in edges {
+        adj.get_mut(&id1).unwrap().insert(id2);
+        adj.get_mut(&id2).unwrap().insert(id1);
     }
 
     adj
@@ -204,14 +206,17 @@ fn extract_core_chunk(
     // Pick a seed: e.g. highest-degree node
     let &seed = remaining
         .iter()
-        .max_by_key(|id| adj.get(id).map_or(0, |neighs| neighs.len()))
+        .max_by_key(|id| adj.get(id)
+        .map_or(0, |neighs| neighs.len()))
         .expect("remaining non-empty");
 
     let mut core = HashSet::new();
     let mut frontier = vec![seed];
     core.insert(seed);
 
-    while core.len() < max_size && !frontier.is_empty() {
+    while core.len() < max_size && 
+        !frontier.is_empty() {
+
         let mut next_frontier = Vec::new();
 
         for node in frontier {
@@ -271,12 +276,11 @@ fn build_subgraph_for_ids(
 
 fn connect_singletons_to_cliques(
     clusters: Vec<HashSet<u32>>,
-    ani_details: &HashMap<(u32, u32), f32>,
+    ani_map: &HashMap<(u32, u32), AniData>,
     ani_cutoff: f32,
     aligned_frac: f32,
-    af_ref: &HashMap<(u32, u32), f32>,
-    af_query: &HashMap<(u32, u32), f32>,
 ) -> Vec<HashSet<u32>> {
+
     // Split into multi-node cliques & singleton nodes
     let mut cliques: Vec<HashSet<u32>> = Vec::new();
     let mut singletons: Vec<u32> = Vec::new();
@@ -301,15 +305,12 @@ fn connect_singletons_to_cliques(
             let mut all_ok = true;
 
             for &member in clique.iter() {
-                let key = if node <= member {
-                    (node, member)
-                } else {
-                    (member, node)
-                };
 
-                let ani = ani_details.get(&key).copied().unwrap_or(0.0);
-                let af_r = af_ref.get(&key).copied().unwrap_or(0.0);
-                let af_q = af_query.get(&key).copied().unwrap_or(0.0);
+                let key = if node <= member { (node, member) } else { (member, node) };
+
+                let (ani, af_r, af_q) = ani_map.get(&key)
+                    .map(|d| (d.ani, d.af_ref, d.af_query))
+                    .unwrap_or((0.0, 0.0, 0.0));
 
                 if ani < ani_cutoff || af_r < aligned_frac || af_q < aligned_frac {
                     all_ok = false;

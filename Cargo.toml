@@ -22,6 +22,7 @@ hashbrown = "0.15"
 memmap2 = "0.9"
 seq_io = "0.3"
 which = "8.0"
+dashmap = "6"
 
 [profile.release]
 lto = "fat"

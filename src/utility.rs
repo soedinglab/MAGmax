@@ -1,17 +1,21 @@
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::fs::{self, read_to_string, File};
+use std::io::{self, BufRead, BufReader, Write};
+use std::process::exit;
+use std::sync::{Arc, Mutex};
+use dashmap::DashMap;
 use log::{error, info};
 use rayon::prelude::*;
 use rayon::ThreadPool;
-use std::collections::{HashMap, HashSet};
-use std::fs::{self, read_to_string, File};
-use std::io::{self, BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
-use std::process::exit;
-use std::sync::{Arc, Mutex};
+
+
+
 
 // Helper function
 pub fn validate_path<'a>(path: Option<&'a PathBuf>, name: &'a str, suffix: &str) -> &'a PathBuf {
     let path = path.expect(&format!("{} path is required", name));
-
+    
     if !path.exists() {
         error!("Error: The specified path for {} does not exist", name);
         std::process::exit(1);
@@ -47,19 +51,23 @@ pub fn validate_path<'a>(path: Option<&'a PathBuf>, name: &'a str, suffix: &str)
 
 // Helper function
 pub fn path_to_str(path: &PathBuf) -> &str {
-    path.to_str().expect("Failed to convert PathBuf to &str")
+    path.to_str()
+    .expect("Failed to convert PathBuf to &str")
 }
 
 // Helper function
 pub fn check_paired_reads(directory: &PathBuf) -> bool {
     fs::read_dir(directory)
         .ok()
-        .and_then(|entries| {
-            entries
-                .filter_map(|entry| entry.ok()?.file_name().to_str().map(String::from))
-                .find(|name| name.contains("_1") || name.contains("_2"))
-        })
-        .is_some()
+        .and_then(|entries
+        | { entries
+            .filter_map(|entry
+            | entry.ok()?.file_name()
+            .to_str().map(String::from))
+            .find(|name
+            | name.contains("_1") || name.contains("_2"))
+    })
+    .is_some()
 }
 
 // Helper function
@@ -81,15 +89,12 @@ pub fn get_binfiles(dir: &Path, extension: &str) -> io::Result<Vec<PathBuf>> {
         let path = entry.path();
 
         if path.is_file() {
-            let filename = path
-                .file_name()
+            let filename = path.file_name()
                 .unwrap_or_default()
-                .to_str()
-                .unwrap_or_default();
-            if filename.contains("_all_seqs")
-                || filename.contains("rep_seq")
-                || filename.contains("combined")
-            {
+                .to_str().unwrap_or_default();
+            if filename.contains("_all_seqs") ||
+                filename.contains("rep_seq") ||
+                filename.contains("combined") {
                 continue;
             }
 
@@ -113,10 +118,9 @@ pub fn get_sample_names(bindir: &Path, extension: &str) -> io::Result<HashMap<St
             continue;
         }
         // Open the file and read the first line
-        let file_name = path
-            .file_stem()
-            .and_then(|name| name.to_str()) // Convert OsStr to &str
-            .unwrap_or("unknown") // Fallback if conversion fails
+        let file_name = path.file_stem()
+            .and_then(|name| name.to_str())  // Convert OsStr to &str
+            .unwrap_or("unknown")            // Fallback if conversion fails
             .to_string();
         let file = fs::File::open(&path)?;
         let mut reader = io::BufReader::new(file);
@@ -126,8 +130,7 @@ pub fn get_sample_names(bindir: &Path, extension: &str) -> io::Result<HashMap<St
             continue;
         }
 
-        let sample_id = first_line
-            .trim()
+        let sample_id = first_line.trim()
             .trim_start_matches('>')
             .split('C')
             .next()
@@ -145,7 +148,8 @@ pub fn splitbysampleid(
     bin_name: &str,
     binspecificdir: &PathBuf,
     format: &str,
-) -> io::Result<()> {
+) -> io::Result<()>{
+
     if !binspecificdir.exists() {
         fs::create_dir_all(&binspecificdir)?;
     }
@@ -159,13 +163,7 @@ pub fn splitbysampleid(
         let line = line?;
         if line.starts_with('>') {
             current_sample_id = extract_sample_id(&line)?;
-            ensure_writer(
-                &current_sample_id,
-                bin_name,
-                binspecificdir,
-                format,
-                &mut writers,
-            )?;
+            ensure_writer(&current_sample_id, bin_name, binspecificdir, format, &mut writers)?;
         }
         write_line_to_file(&current_sample_id, &line, &mut writers)?;
     }
@@ -215,16 +213,17 @@ pub fn split_bins_by_sample(
     Ok(samplewisebinspath)
 }
 
+
 // Helper function
 pub fn extract_sample_id(line: &str) -> io::Result<String> {
     if let Some(idx) = line.find('C') {
         Ok(line[1..idx].to_string()) // Exclude the '>'
     } else {
         error!("Warning: Could not find 'C' in header: {}", line);
-        Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Invalid header format",
-        ))
+        Err(
+        io::Error::new(
+        io::ErrorKind::InvalidData
+        ,"Invalid header format"))
     }
 }
 
@@ -236,10 +235,9 @@ pub fn ensure_writer(
     format: &str,
     writers: &mut HashMap<String, File>,
 ) -> io::Result<()> {
-    if !writers.contains_key(sample_id) {
+    if let std::collections::hash_map::Entry::Vacant(e) = writers.entry(sample_id.to_string()) {
         let output_filename = binspecificdir.join(format!("{}_{}.{}", bin_name, sample_id, format));
-        let output_file = File::create(output_filename)?;
-        writers.insert(sample_id.to_string(), output_file);
+        e.insert(File::create(output_filename)?);
     }
     Ok(())
 }
@@ -248,14 +246,11 @@ pub fn ensure_writer(
 pub fn assign_members(
     component: &HashSet<String>,
     rep: &str,
-    memberships_map: &Arc<Mutex<HashMap<String, String>>>,
+    memberships_map: &Arc<DashMap<String, String>>,
 ) {
-    if let Ok(mut map) = memberships_map.lock() {
-        let rep_s = rep.to_string();
-        for m in component.iter() {
-            // member -> representative
-            map.insert(m.clone(), rep_s.clone());
-        }
+    let rep_s = rep.to_string();
+    for m in component.iter() {
+        memberships_map.insert(m.clone(), rep_s.clone());
     }
 }
 
@@ -265,18 +260,16 @@ pub fn rep_members_from_member_rep(
     let mut rep_to_members: HashMap<String, Vec<String>> = HashMap::new();
 
     for (member, rep) in member_to_rep {
-        rep_to_members.entry(rep.clone()).or_default();
+        let members = rep_to_members.entry(rep.clone()).or_default();
         if member != rep {
-            rep_to_members
-                .entry(rep.clone())
-                .or_default()
-                .push(member.clone());
+            members.push(member.clone());
         }
     }
 
     rep_to_members
 }
 
+// Write membership tsv file, rep\tmember1,member2,member3
 pub fn write_membership_file(
     memberships_map: &HashMap<String, Vec<String>>,
     output_path: &Path,
@@ -288,15 +281,20 @@ pub fn write_membership_file(
 
     writeln!(writer, "#representative\tmember_genomes")?;
     for rep in representatives {
-        let mut members = memberships_map.get(rep).cloned().unwrap_or_default();
-        members.sort_unstable();
-        members.dedup();
-        writeln!(writer, "{}\t{}", rep, members.join(","))?;
+        if let Some(members) = memberships_map.get(rep) {
+            let mut members = members.clone();
+            members.sort_unstable();
+            members.dedup();
+            writeln!(writer, "{}\t{}", rep, members.join(","))?;
+        } else {
+            writeln!(writer, "{}\t", rep)?;
+        }
     }
 
     info!("Membership details are written to {:?}", output_path);
     Ok(())
 }
+
 
 // Helper function
 pub fn write_line_to_file(
@@ -304,23 +302,22 @@ pub fn write_line_to_file(
     line: &str,
     writers: &mut HashMap<String, File>,
 ) -> io::Result<()> {
-    if let Some(writer) = writers.get_mut(sample_id) {
-        writeln!(writer, "{}", line)?;
+    if let Some(writer) =
+        writers.get_mut(sample_id) {
+            writeln!(writer, "{}", line)?;
     }
     Ok(())
 }
 
 // Helper function
 pub fn read_fasta(fasta_file: &str) -> io::Result<HashSet<String>> {
-    let content = read_to_string(fasta_file)?;
+    let reader = BufReader::new(File::open(fasta_file)?);
     let mut scaffolds = HashSet::new();
-    for line in content.lines() {
-        if line.starts_with(">") {
-            let scaffold_name = line
-                .trim_start_matches(">")
-                .split_whitespace()
-                .next()
-                .unwrap_or(line.trim_start_matches(">"));
+    for line in reader.lines() {
+        let line = line?;
+        if line.starts_with('>') {
+            let rest = &line[1..];
+            let scaffold_name = rest.split_whitespace().next().unwrap_or(rest);
             scaffolds.insert(scaffold_name.to_string());
         }
     }
@@ -330,10 +327,9 @@ pub fn read_fasta(fasta_file: &str) -> io::Result<HashSet<String>> {
 // Helper function
 pub fn get_output_binname(bin_fasta: &str) -> PathBuf {
     let path = Path::new(bin_fasta);
-
+    
     let output_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let filename = path
-        .file_stem()
+    let filename = path.file_stem()
         .map(|stem| stem.to_str().unwrap_or("default"))
         .unwrap_or("default");
     output_dir.join(format!("{}.fasta", filename))

@@ -1,15 +1,27 @@
 use csv::ReaderBuilder;
-use log::error;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::fs::{self, File};
 use std::io::{self};
-use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
+use log::error;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
+#[derive(Debug)]
 pub struct BinQuality {
     pub completeness: f32,
     pub contamination: f32,
+}
+
+impl BinQuality {
+    pub fn score(&self) -> f32 {
+        quality_score(self.completeness, self.contamination)
+    }
+}
+
+pub fn quality_score(completeness: f32, contamination: f32) -> f32 {
+    completeness - 5.0 * contamination
 }
 
 /// Run CheckM2 to obtain completeness and contamination of input bins
@@ -19,32 +31,38 @@ pub fn assess_bins(
     threads: usize,
     format: &str,
 ) -> Result<PathBuf, io::Error> {
+
     let checkm2_qualities = Path::new(bincheckm2dir).join("quality_report.tsv");
 
     if !checkm2_qualities.exists() {
         let mut output = ProcessCommand::new("checkm2");
         output
-            .arg("predict")
-            .arg("-i")
-            .arg(bindir)
-            .arg("-o")
-            .arg(bincheckm2dir)
-            .arg("-t")
-            .arg(threads.to_string())
-            .arg("-x")
-            .arg(format)
-            .arg("--force")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-
+        .arg("predict")
+        .arg("-i")
+        .arg(bindir)
+        .arg("-o")
+        .arg(bincheckm2dir)
+        .arg("-t")
+        .arg(threads.to_string())
+        .arg("-x")
+        .arg(format)
+        .arg("--force")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    
         match output.status() {
-            Ok(_) => {}
+            Ok(status) if status.success() => {}
+            Ok(status) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("CheckM2 exited with non-zero status: {}", status),
+                ));
+            }
             Err(e) => {
-                error!(
-                    "Error: Failed to execute CheckM2 command - {}. 
-                    Check if CheckM2 is executable currently",
-                    e
-                );
+                return Err(io::Error::new(
+                    e.kind(),
+                    format!("Failed to execute CheckM2: {}. Check if CheckM2 is in PATH", e),
+                ));
             }
         }
     }
@@ -52,8 +70,11 @@ pub fn assess_bins(
 }
 
 /// Parse CheckM2 result
-pub fn parse_bins_quality(checkm2_qualities: &PathBuf) -> io::Result<HashMap<String, BinQuality>> {
-    let _ = File::open(checkm2_qualities).map_err(|e| {
+pub fn parse_bins_quality(
+    checkm2_qualities: &PathBuf,
+) -> io::Result<HashMap<String, BinQuality>> {
+
+    let file = File::open(checkm2_qualities).map_err(|e| {
         io::Error::new(
             e.kind(),
             format!("Failed to open checkm2 quality file for bin: {:?}", e),
@@ -63,7 +84,7 @@ pub fn parse_bins_quality(checkm2_qualities: &PathBuf) -> io::Result<HashMap<Str
     let mut rdr = ReaderBuilder::new()
         .has_headers(true)
         .delimiter(b'\t')
-        .from_reader(File::open(checkm2_qualities)?);
+        .from_reader(file);
     let mut bin_qualities: HashMap<String, BinQuality> = HashMap::new();
 
     for result in rdr.records() {
@@ -72,22 +93,16 @@ pub fn parse_bins_quality(checkm2_qualities: &PathBuf) -> io::Result<HashMap<Str
             error!("Skipping invalid record: {:?}", record);
             continue; // Skip records that do not have enough columns
         }
-        let mut bin_id: String = record[0].to_string();
-        for ext in [".fasta", ".faa", ".fna", ".fa", ".fas", ".ffn"] {
-            if let Some(stripped) = bin_id.strip_suffix(ext) {
-                bin_id = stripped.to_string();
-                break;
-            }
-        }
+        let raw: &str = &record[0];
+        let bin_id: Cow<str> = [".fasta", ".faa", ".fna", ".fa", ".fas", ".ffn"]
+            .iter()
+            .find_map(|ext| raw.strip_suffix(ext))
+            .map(Cow::Borrowed)
+            .unwrap_or(Cow::Borrowed(raw));
         let completeness: f32 = record[1].parse().unwrap_or(0.0);
         let contamination: f32 = record[2].parse().unwrap_or(0.0);
-        bin_qualities.insert(
-            bin_id,
-            BinQuality {
-                completeness,
-                contamination,
-            },
-        );
+        bin_qualities.insert(bin_id.into_owned(),
+        BinQuality{ completeness, contamination });
     }
     Ok(bin_qualities)
 }
@@ -107,6 +122,7 @@ pub fn filter_bins_quality(
         .collect()
 }
 
+
 /// Select a high-quality bin if it exist in the cluster
 pub fn check_high_quality_bin(
     comp: &HashSet<String>,
@@ -114,26 +130,20 @@ pub fn check_high_quality_bin(
     bindir: &PathBuf,
     resultdir: &PathBuf,
     format: &str,
+    completeness_cutoff: f32,
 ) -> Option<String> {
-    let comp_binqualities: HashMap<String, BinQuality> = bin_qualities
-        .iter()
-        .filter(|(bin, _)| comp.contains(bin.as_str()))
-        .map(|(bin, q)| (bin.clone(), q.clone()))
-        .collect();
+    let hq_threshold = completeness_cutoff.max(90.0);
 
-    if let Some((binname, _)) = comp_binqualities
+    if let Some((binname, _)) = comp
         .iter()
-        .filter(|(_, q)| q.completeness > 90.0)
-        .max_by(|(bin1, q1), (bin2, q2)| {
-            // select the best bin by quality score
-            let score1 = q1.completeness - (5.0 * q1.contamination);
-            let score2 = q2.completeness - (5.0 * q2.contamination);
-
-            score1
-                .total_cmp(&score2)
+        .filter_map(|bin| bin_qualities.get(bin).map(|q| (bin, q)))
+        .filter(|(_, q)| q.completeness > hq_threshold)
+        .max_by(|(_, q1), (_, q2)| {
+            q1.score()
+                .total_cmp(&q2.score())
                 .then_with(|| q2.contamination.total_cmp(&q1.contamination))
-                .then_with(|| bin2.cmp(bin1).reverse()) // Tie-breaker based on contamination
         })
+
     {
         let bin_path = bindir.join(format!("{}.{}", binname, format));
         let final_path = resultdir.join(format!("{}.{}", binname, format));
