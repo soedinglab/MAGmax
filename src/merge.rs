@@ -446,7 +446,7 @@ pub fn drep_finalbins(
 }
 
 // Run skani
-fn get_ani(inputbins: Vec<String>, ani_output: &PathBuf, threads: usize) -> Result<(), io::Error> {
+pub fn get_ani(inputbins: Vec<String>, ani_output: &PathBuf, threads: usize) -> Result<(), io::Error> {
     if which::which("skani").is_err() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,

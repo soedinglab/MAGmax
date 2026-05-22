@@ -53,6 +53,7 @@ pub fn select_highconnectivity_bins(
     bin_qualities: &HashMap<String, BinQuality>,
     result_dir: &Path,
 ) -> HashSet<String> {
+    let isolate_genomes = HashSet::new();
     let (rep_set, rep_members) = select_highconnectivity_bins_with_memberships(
         graph,
         ani_details,
@@ -60,6 +61,7 @@ pub fn select_highconnectivity_bins(
         id_to_name,
         id_to_node,
         bin_qualities,
+        &isolate_genomes,
     );
 
     let _ = utility::write_membership_file(&rep_members, &result_dir.join("memberships.tsv"));
@@ -74,6 +76,7 @@ pub fn select_highconnectivity_bins_with_memberships(
     id_to_name: &[String],
     id_to_node: &HashMap<u32, NodeIndex>,
     bin_qualities: &HashMap<String, BinQuality>,
+    isolate_genomes: &HashSet<String>,
 ) -> (HashSet<String>, HashMap<String, Vec<String>>) {
     let connected_components = merge::compute_connected_components(&graph);
 
@@ -102,6 +105,7 @@ pub fn select_highconnectivity_bins_with_memberships(
             let mut best_bin: Option<u32> = None;
             let mut best_wdeg: f32 = -1.0;
             let mut best_quality: f32 = -1.0;
+            let mut best_is_isolate = false;
 
             for &n in &component {
                 if uncovered.contains(&n) && !blocked.contains(&n) {
@@ -109,6 +113,7 @@ pub fn select_highconnectivity_bins_with_memberships(
                     let wdeg = *node_degrees.get(&n).unwrap_or(&0.0);
                     let bin_name = &id_to_name[n as usize];
                     let bin_quality = &bin_qualities[bin_name];
+                    let is_isolate = isolate_genomes.contains(bin_name);
                     let completeness = bin_quality.completeness;
                     let contamination = bin_quality.contamination;
                     let qscore = completeness - (5.0 * contamination);
@@ -116,15 +121,18 @@ pub fn select_highconnectivity_bins_with_memberships(
                         "Evaluating bin {}: wdeg {}, qscore {}",
                         bin_name, wdeg, qscore
                     );
-                    let better = (wdeg > best_wdeg)
-                        || (wdeg == best_wdeg && qscore > best_quality)
-                        || (wdeg == best_wdeg
-                            && qscore == best_quality
-                            && best_bin.map_or(true, |b| n < b));
+                    let better = (is_isolate && !best_is_isolate)
+                        || (is_isolate == best_is_isolate
+                            && ((wdeg > best_wdeg)
+                                || (wdeg == best_wdeg && qscore > best_quality)
+                                || (wdeg == best_wdeg
+                                    && qscore == best_quality
+                                    && best_bin.map_or(true, |b| n < b))));
 
                     if better {
                         best_wdeg = wdeg;
                         best_quality = qscore;
+                        best_is_isolate = is_isolate;
                         best_bin = Some(n);
                     }
                 }

@@ -39,7 +39,7 @@ fn validate_paths(cli: &Cli) -> io::Result<(PathBuf, PathBuf, PathBuf)> {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(name = "customedb", alias = "customdb")]
+    #[command(name = "customdb")]
     Customedb(customdb::CustomDbArgs),
 }
 

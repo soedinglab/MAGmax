@@ -5,7 +5,7 @@ use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use clap::Args;
-use log::{info, warn};
+use log::{debug, info, warn};
 use rayon::ThreadPoolBuilder;
 
 use crate::{assess, merge, mwids, reassemble, utility};
@@ -36,6 +36,13 @@ pub struct CustomDbArgs {
         help = "Quality file produced by CheckM2 (quality_report.tsv)"
     )]
     pub qual: Option<PathBuf>,
+
+    /// File listing isolate genomes present in the input bin directory
+    #[arg(
+        long = "isolate-genomes",
+        help = "File listing isolate genomes in the input bins; these are prioritized as species representatives"
+    )]
+    pub isolate_genomes: Option<PathBuf>,
 
     /// Select representatives based on high connectivity
     #[arg(
@@ -137,6 +144,9 @@ pub fn run(args: &CustomDbArgs) -> io::Result<()> {
     if let Some(qual) = &args.qual {
         info!("  CheckM2 quality file: {:?}", qual);
     }
+    if let Some(isolate_genomes) = &args.isolate_genomes {
+        info!("  Isolate genome list: {:?}", isolate_genomes);
+    }
     if let Some(anifile) = &args.anifile {
         info!("  ANI file: {:?}", anifile);
     }
@@ -176,12 +186,25 @@ pub fn run(args: &CustomDbArgs) -> io::Result<()> {
         quality_filtered_bins.len()
     );
 
+    let isolate_genomes = read_isolate_genomes(args.isolate_genomes.as_deref())?;
+    let ignored_isolates = isolate_genomes
+        .len()
+        .saturating_sub(isolate_genomes.intersection(&quality_filtered_bins).count());
+
+    if ignored_isolates > 0 {
+        warn!(
+            "{} isolate genomes from the input are not quality passed and will be ignored",
+            ignored_isolates
+        );
+    }
+
     let gtdb_bins = parse_gtdbtk_summary(
         &args.gtdbtk,
         args.species_ani,
         args.species_alignedfrac,
         &quality_filtered_bins,
     )?;
+
     let perfect_bins = gtdb_bins.perfect;
     let remaining_bins = gtdb_bins.remaining;
     let sp_aniradius = gtdb_bins.sp_aniradius;
@@ -195,7 +218,8 @@ pub fn run(args: &CustomDbArgs) -> io::Result<()> {
     let output_dir = customdb_output_dir(args, &bindir);
     fs::create_dir_all(&output_dir)?;
 
-    let mut memberships_map = group_perfect_bins_by_species(&perfect_bins, &bin_qualities);
+    let mut memberships_map =
+        group_perfect_bins_by_species(&perfect_bins, &bin_qualities, &isolate_genomes);
     write_gtdbtk_species_representatives(
         &memberships_map,
         &output_dir.join("gtdbtk_species_representatives.tsv"),
@@ -210,8 +234,14 @@ pub fn run(args: &CustomDbArgs) -> io::Result<()> {
         .collect();
 
     if !remaining_qualities.is_empty() {
-        let (remaining_reps, remaining_memberships) =
-            process_remaining_bins(args, &bindir, &remaining_qualities)?;
+        let (remaining_reps, remaining_memberships) = process_remaining_bins(
+            args,
+            &bindir,
+            &output_dir,
+            &representative_bins,
+            &remaining_qualities,
+            &isolate_genomes,
+        )?;
         write_remaining_species_ani_report(
             args,
             &bindir,
@@ -225,7 +255,7 @@ pub fn run(args: &CustomDbArgs) -> io::Result<()> {
         merge_memberships(&mut memberships_map, remaining_memberships);
     }
 
-    copy_representative_bins(&representative_bins, &bindir, &output_dir, &args.format)?;
+    // copy_representative_bins(&representative_bins, &bindir, &output_dir, &args.format)?;
     utility::write_membership_file(&memberships_map, &output_dir.join("memberships.tsv"))?;
     write_quality_file(&representative_bins, &bin_qualities, &output_dir)?;
 
@@ -247,7 +277,7 @@ fn write_remaining_species_ani_report(
 
     // `ani_details` is keyed by internal node IDs from the remaining-bin graph.
     // For remaining-vs-existing-cluster checks, use the skani TSV keyed by bin names.
-    let ani_by_name = load_ani_by_name(args, bindir)?;
+    let (ani_by_name, afr_by_name, afq_by_name) = load_ani_by_name(args, bindir)?;
 
     let report_path =
         output_dir.join("unclassified_clusterrepresentatives_gtdbtkspecies_ani_connections.tsv");
@@ -260,7 +290,7 @@ fn write_remaining_species_ani_report(
 
     writeln!(
         writer,
-        "#unclassfiedcluster_representative\tgtdbtkspeciesrep\tANI\tspciesANI_radius\tall_members_shareANI_aboveradius"
+        "#unclassified_cluster_representative\tgtdbtk_species_representative\tANI\tspecies_ANI_radius\tall_members_share_ANI_above_radius"
     )?;
 
     for remaining_rep in reps {
@@ -280,14 +310,24 @@ fn write_remaining_species_ani_report(
             }
             cluster_members.sort_unstable();
 
-            let mut member_ani = Vec::new();
             let mut all_members_above_species_ani = true;
 
             let Some(rep_ani) = lookup_ani_by_name(remaining_rep, cluster_rep, &ani_by_name) else {
                 continue;
             };
-            if rep_ani >= sp_aniradius.get(*cluster_rep).copied().unwrap_or(0.0) {
-                member_ani.push(format!("{}:{:.4}", cluster_rep, rep_ani));
+            debug!(
+                "species ANI radius: {}",
+                sp_aniradius.get(*cluster_rep).copied().unwrap_or(0.0)
+            );
+            if rep_ani < sp_aniradius.get(*cluster_rep).copied().unwrap_or(0.0) {
+                continue;
+            }
+            let key = ordered_name_pair(remaining_rep.clone(), (*cluster_rep).clone());
+            if afr_by_name.get(&key).copied().unwrap_or(0.0) < args.species_alignedfrac {
+                continue;
+            }
+            if afq_by_name.get(&key).copied().unwrap_or(0.0) < args.species_alignedfrac {
+                continue;
             }
             for member in &cluster_members {
                 if remaining_rep == member {
@@ -304,6 +344,15 @@ fn write_remaining_species_ani_report(
                 };
 
                 if ani < sp_aniradius.get(member).copied().unwrap_or(0.0) {
+                    all_members_above_species_ani = false;
+                    break;
+                }
+                let key = ordered_name_pair(remaining_rep.clone(), member.clone());
+                if afr_by_name.get(&key).copied().unwrap_or(0.0) < args.species_alignedfrac {
+                    all_members_above_species_ani = false;
+                    break;
+                }
+                if afq_by_name.get(&key).copied().unwrap_or(0.0) < args.species_alignedfrac {
                     all_members_above_species_ani = false;
                     break;
                 }
@@ -331,7 +380,11 @@ fn write_remaining_species_ani_report(
 fn load_ani_by_name(
     args: &CustomDbArgs,
     bindir: &PathBuf,
-) -> io::Result<HashMap<(String, String), f32>> {
+) -> io::Result<(
+    HashMap<(String, String), f32>,
+    HashMap<(String, String), f32>,
+    HashMap<(String, String), f32>,
+)> {
     let ani_file = args
         .anifile
         .clone()
@@ -341,22 +394,27 @@ fn load_ani_by_name(
     let infile = File::open(&ani_file)?;
     let reader = BufReader::new(infile);
     let mut ani_by_name = HashMap::new();
-
+    let mut afr_by_name = HashMap::new();
+    let mut afq_by_name = HashMap::new();
     for line in reader.lines().skip(1) {
         let line = line?;
         let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 3 {
+        if fields.len() < 5 {
             continue;
         }
 
         let bin1 = ani_bin_name(fields[0]);
         let bin2 = ani_bin_name(fields[1]);
         let ani = fields[2].parse::<f32>().unwrap_or(0.0);
+        let afr = fields[3].parse::<f32>().unwrap_or(0.0);
+        let afq = fields[4].parse::<f32>().unwrap_or(0.0);
         let key = ordered_name_pair(bin1, bin2);
-        ani_by_name.insert(key, ani);
+        ani_by_name.insert(key.clone(), ani);
+        afr_by_name.insert(key.clone(), afr);
+        afq_by_name.insert(key, afq);
     }
 
-    Ok(ani_by_name)
+    Ok((ani_by_name, afr_by_name, afq_by_name))
 }
 
 fn ani_bin_name(value: &str) -> String {
@@ -376,6 +434,60 @@ fn lookup_ani_by_name(
         .copied()
 }
 
+fn get_remaining_ani_file(
+    args: &CustomDbArgs,
+    bindir: &PathBuf,
+    output_dir: &PathBuf,
+    representative_bins: &HashSet<String>,
+    remaining_qualities: &HashMap<String, assess::BinQuality>,
+) -> io::Result<PathBuf> {
+    if let Some(anifile) = &args.anifile {
+        return Ok(anifile.clone());
+    }
+
+    let ani_output = output_dir.join("ani_edges");
+    if ani_output.exists() {
+        fs::remove_file(&ani_output).ok();
+    }
+
+    let mut input_bin_paths = Vec::new();
+    for bin in representative_bins {
+        let bin_path = bindir.join(format!("{}.{}", bin, args.format));
+        if !bin_path.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("Perfect bin file not found: {:?}", bin_path),
+            ));
+        }
+        input_bin_paths.push(bin_path.to_string_lossy().into_owned());
+    }
+
+    for bin in remaining_qualities.keys() {
+        let bin_path = bindir.join(format!("{}.{}", bin, args.format));
+        if !bin_path.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("Remaining bin file not found: {:?}", bin_path),
+            ));
+        }
+        input_bin_paths.push(bin_path.to_string_lossy().into_owned());
+    }
+
+    if input_bin_paths.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "No input bin files available to generate ANI file",
+        ));
+    }
+
+    info!(
+        "Calculating ANI among perfect bins and remaining bins using skani: {:?}",
+        ani_output
+    );
+    merge::get_ani(input_bin_paths, &ani_output, args.threads)?;
+    Ok(ani_output)
+}
+
 fn ordered_name_pair(bin1: String, bin2: String) -> (String, String) {
     if bin1 <= bin2 {
         (bin1, bin2)
@@ -387,13 +499,17 @@ fn ordered_name_pair(bin1: String, bin2: String) -> (String, String) {
 fn process_remaining_bins(
     args: &CustomDbArgs,
     bindir: &PathBuf,
+    output_dir: &PathBuf,
+    representative_bins: &HashSet<String>,
     remaining_qualities: &HashMap<String, assess::BinQuality>,
+    isolate_genomes: &HashSet<String>,
 ) -> io::Result<(HashSet<String>, HashMap<String, Vec<String>>)> {
+    let ani_file = get_remaining_ani_file(args, bindir, output_dir, representative_bins, remaining_qualities)?;
     let (graph, ani_details, id_to_name, id_to_node, af_ref, af_query) = merge::calc_ani(
         bindir,
         remaining_qualities,
         &args.format,
-        args.anifile.clone(),
+        Some(ani_file),
         args.species_ani,
         args.completeness_cutoff,
         args.purity_cutoff,
@@ -411,6 +527,7 @@ fn process_remaining_bins(
             &id_to_name,
             &id_to_node,
             remaining_qualities,
+            isolate_genomes,
         ));
     }
 
@@ -429,9 +546,12 @@ fn process_remaining_bins(
     let mut member_to_rep = HashMap::new();
 
     for component in connected_bins {
-        if let Some(rep) =
-            select_no_reassembly_rep(&component, remaining_qualities, args.completeness_cutoff)
-        {
+        if let Some(rep) = select_no_reassembly_rep(
+            &component,
+            remaining_qualities,
+            args.completeness_cutoff,
+            isolate_genomes,
+        ) {
             representative_bins.insert(rep.clone());
             for member in component {
                 member_to_rep.insert(member, rep.clone());
@@ -449,6 +569,7 @@ fn select_no_reassembly_rep(
     component: &HashSet<String>,
     bin_qualities: &HashMap<String, assess::BinQuality>,
     completeness_cutoff: f32,
+    isolate_genomes: &HashSet<String>,
 ) -> Option<String> {
     if component.len() == 1 {
         let binname = component.iter().next()?;
@@ -457,6 +578,11 @@ fn select_no_reassembly_rep(
             return Some(binname.clone());
         }
         return None;
+    }
+
+    let isolate_bins = bins_in_isolate_list(component.iter(), isolate_genomes);
+    if let Some(rep) = select_best_quality_bin(&isolate_bins, bin_qualities) {
+        return Some(rep);
     }
 
     let high_quality_bins = component
@@ -487,21 +613,21 @@ fn merge_memberships(
     }
 }
 
-fn copy_representative_bins(
-    representative_bins: &HashSet<String>,
-    bindir: &Path,
-    output_dir: &Path,
-    format: &str,
-) -> io::Result<()> {
-    for bin in representative_bins {
-        let bin_path = bindir.join(format!("{}.{}", bin, format));
-        let final_path = output_dir.join(format!("{}.{}", bin, format));
-        if !final_path.exists() {
-            fs::copy(&bin_path, &final_path)?;
-        }
-    }
-    Ok(())
-}
+// fn copy_representative_bins(
+//     representative_bins: &HashSet<String>,
+//     bindir: &Path,
+//     output_dir: &Path,
+//     format: &str,
+// ) -> io::Result<()> {
+//     for bin in representative_bins {
+//         let bin_path = bindir.join(format!("{}.{}", bin, format));
+//         let final_path = output_dir.join(format!("{}.{}", bin, format));
+//         if !final_path.exists() {
+//             fs::copy(&bin_path, &final_path)?;
+//         }
+//     }
+//     Ok(())
+// }
 
 fn write_gtdbtk_species_representatives(
     memberships_map: &HashMap<String, Vec<String>>,
@@ -581,13 +707,14 @@ fn group_bins_by_species(perfect_bins: &PerfectGtdbBins) -> HashMap<String, Vec<
 fn group_perfect_bins_by_species(
     perfect_bins: &PerfectGtdbBins,
     bin_qualities: &HashMap<String, assess::BinQuality>,
+    isolate_genomes: &HashSet<String>,
 ) -> HashMap<String, Vec<String>> {
     let mut species_bins = group_bins_by_species(perfect_bins);
 
     let mut memberships_map = HashMap::new();
     for bins in species_bins.values_mut() {
         bins.sort_unstable();
-        let Some(rep) = select_best_quality_bin(bins, bin_qualities) else {
+        let Some(rep) = select_isolate_priority_rep(bins, bin_qualities, isolate_genomes) else {
             continue;
         };
 
@@ -600,6 +727,44 @@ fn group_perfect_bins_by_species(
     }
 
     memberships_map
+}
+
+fn select_isolate_priority_rep(
+    bins: &[String],
+    bin_qualities: &HashMap<String, assess::BinQuality>,
+    isolate_genomes: &HashSet<String>,
+) -> Option<String> {
+    let isolate_bins = bins_in_isolate_list(bins.iter(), isolate_genomes);
+    let best_isolate = select_best_quality_bin(&isolate_bins, bin_qualities);
+    let best_overall = select_best_quality_bin(bins, bin_qualities);
+
+    // select best purity bin among isolates if exist
+    // otherwise select best purity bin among all bins in the species cluster
+    match (&best_isolate, &best_overall) {
+        (Some(isolate_bin), Some(overall_bin)) => {
+            let isolate_cont = bin_qualities[isolate_bin].contamination;
+            let overall_cont = bin_qualities[overall_bin].contamination;
+
+            if overall_cont < isolate_cont {
+                best_overall
+            } else {
+                best_isolate
+            }
+        }
+        (Some(_), None) => best_isolate,
+        (None, Some(_)) => best_overall,
+        (None, None) => None,
+    }
+}
+
+fn bins_in_isolate_list<'a, I>(bins: I, isolate_genomes: &HashSet<String>) -> Vec<String>
+where
+    I: IntoIterator<Item = &'a String>,
+{
+    bins.into_iter()
+        .filter(|bin| isolate_genomes.contains(*bin))
+        .cloned()
+        .collect()
 }
 
 fn select_best_quality_bin(
@@ -618,6 +783,36 @@ fn select_best_quality_bin(
                 .then_with(|| bin2.cmp(bin1).reverse())
         })
         .map(|(bin, _)| bin.clone())
+}
+
+fn read_isolate_genomes(isolate_path: Option<&Path>) -> io::Result<HashSet<String>> {
+    let Some(isolate_path) = isolate_path else {
+        return Ok(HashSet::new());
+    };
+
+    let infile = File::open(isolate_path)?;
+    let reader = BufReader::new(infile);
+    let mut isolate_genomes = HashSet::new();
+
+    for line in reader.lines() {
+        let line = line?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        if let Some(genome) = trimmed.split_whitespace().next() {
+            isolate_genomes.insert(normalize_bin_name(genome));
+        }
+    }
+
+    Ok(isolate_genomes)
+}
+
+fn normalize_bin_name(value: &str) -> String {
+    let value = value.trim_end_matches(['/', '\\']);
+    let basename = value.rsplit(['/', '\\']).next().unwrap_or(value);
+    strip_bin_extension(basename).to_string()
 }
 
 fn filter_bins_by_quality(
@@ -748,8 +943,8 @@ fn parse_gtdbtk_summary(
             ani_species
         };
 
-        if let Some(species) = species {
-            sp_aniradius.insert(species.to_string(), species_ani_radius);
+        if let Some(_) = species {
+            sp_aniradius.insert(genome_name.to_string(), species_ani_radius);
         }
         // checks if the bin meets GTDB-Tk species-level criteria:
         // ANI >= species cutoff, ANI >= GTDB-Tk species ANI radius, and aligned fraction >= cutoff
