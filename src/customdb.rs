@@ -950,8 +950,7 @@ fn parse_gtdbtk_summary(
         }
         // checks if the bin meets GTDB-Tk species-level criteria:
         // ANI >= species cutoff, ANI >= GTDB-Tk species ANI radius, and aligned fraction >= cutoff
-        if closest_ani >= ani_species
-            && closest_ani >= species_ani_radius
+        if closest_ani >= species_ani_radius
             && closest_af >= af_species
         {
             if let Some(species) = species {
