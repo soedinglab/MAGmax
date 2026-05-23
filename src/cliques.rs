@@ -347,32 +347,23 @@ fn connect_singletons_to_cliques(
 
         for (i, clique) in cliques.iter().enumerate() {
             let (best_id, best_score, best_is_isolate) = best_bin_of(clique);
-            let key = if node <= best_id { (node, best_id) } else { (best_id, node) };
-
+            
             let mut all_ok = true;
-
             for &member in clique.iter() {
-
                 let key_m = if node <= member { (node, member) } else { (member, node) };
-
                 let (ani, af_r, af_q) = ani_map.get(&key_m)
                     .map(|d| (d.ani, d.af_ref, d.af_query))
                     .unwrap_or((0.0, 0.0, 0.0));
-
                 if ani < ani_cutoff || af_r < aligned_frac || af_q < aligned_frac {
                     all_ok = false;
                     break;
                 }
             }
-
-            if !all_ok {
-                break;
-            }
-
-            if let Some(d) = ani_map.get(&key) {
-                if d.ani >= ani_cutoff && d.af_ref >= aligned_frac && d.af_query >= aligned_frac {
-                    qualified_cliques.push((i, d.ani, best_score, best_is_isolate));
-                }
+            if all_ok {
+                // Use best bin's ANI for tie-breaking in the multi-clique case.
+                let key = if node <= best_id { (node, best_id) } else { (best_id, node) };
+                let best_ani = ani_map.get(&key).map_or(0.0, |d| d.ani);
+                qualified_cliques.push((i, best_ani, best_score, best_is_isolate));
             }
         }
 
@@ -386,15 +377,15 @@ fn connect_singletons_to_cliques(
                 cliques[qualified_cliques[0].0].insert(node);
             }
             _ => {
-                // Multiple potential cliques. The query merges them all when it beats
-                // every clique's best representative; otherwise it joins the closest one.
+                // Multiple potential cliques. The query merges them all when it quality is best
+                // among these cliques representatives; otherwise it joins the closest one.
                 if no_reassembly{
                     let query_is_best = qualified_cliques.iter().all(|&(_, _, best_score, best_iso)| {
                         beats(node_score, node_is_isolate, best_score, best_iso)
                     });
 
                     if query_is_best {
-                        // Query is the highest-quality hub — merge all potential cliques
+                        // Query is the highest quality bin, merge all potential cliques
                         // into one and add the query.
                         let mut indices: Vec<usize> =
                             qualified_cliques.iter().map(|&(i, _, _, _)| i).collect();
@@ -407,7 +398,7 @@ fn connect_singletons_to_cliques(
                         }
                         cliques.push(merged);
                     } else {
-                        // Query is not the best — assign it to the clique whose
+                        // Query is not the best, so assign it to the clique whose
                         // representative has the highest ANI to the query.
                         // Ties are broken by clique size (larger is better).
                         let best_idx = qualified_cliques
@@ -422,7 +413,6 @@ fn connect_singletons_to_cliques(
                         cliques[best_idx].insert(node);
                     }
                 } else {
-                    // attaches to ALL qualifying cliques
                     for &(idx, _, _, _) in &qualified_cliques {
                         cliques[idx].insert(node);
                     }
