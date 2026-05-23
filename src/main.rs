@@ -24,16 +24,21 @@ mod customdb;
 // check for valid input paths
 fn validate_paths(cli: &Cli) -> io::Result<(PathBuf, PathBuf, PathBuf)> {
 
-    let bindir = utility::validate_path(cli.bindir.as_ref(), 
-        "bindir", &cli.format);
+    if cli.bindir.is_none() {
+        eprintln!("error: bindir is required");
+        exit(1);
+    }
+    let bindir = utility::validate_path(cli.bindir.as_ref(), "bindir", &cli.format);
 
     if cli.no_reassembly || cli.sensitive {
         Ok((bindir.to_path_buf(), PathBuf::new(), PathBuf::new()))
     } else {
-        let mapdir = utility::validate_path(
-            cli.mapdir.as_ref(), "mapdir", "_mapids");
-        let readdir = utility::validate_path(
-            cli.readdir.as_ref(), "readdir", ".fastq");
+        if cli.mapdir.is_none() || cli.readdir.is_none() {
+            eprintln!("error: mapdir (-m) and readdir (-r) are required");
+            exit(1);
+        }
+        let mapdir = utility::validate_path(cli.mapdir.as_ref(), "mapdir", "_mapids");
+        let readdir = utility::validate_path(cli.readdir.as_ref(), "readdir", ".fastq");
         Ok((bindir.to_path_buf(), mapdir.to_path_buf(), readdir.to_path_buf()))
     }
 

@@ -149,41 +149,37 @@ Output is written to `specieslevel_customdb/` by default (use `-o` to override),
 | `unclassified_clusterrepresentatives_gtdbtkspecies_ani_connections.tsv` | ANI connections between representatives of novel-clusters and known species clusters that exceed the species ANI radius. Columns: `#unclassified_cluster_representative`, `gtdbtk_species_representative`, `ANI`, `species_ANI_radius`. It informs whether any unclassified representative might actually belong to a known species. |
 
 
-### Options reference
-
-```
-magmax customdb [OPTIONS] -g <GTDBTK>
-
-Required:
-  -g, --gtdbtk <GTDBTK>            GTDB-Tk classification summary file
-
-Quality filtering:
-  -c, --completeness <FLOAT>       Minimum completeness of bins (%) [default: 90]
-  -p, --purity <FLOAT>             Maximum contamination of bins (%) [default: 5]
-  -q, --qual <QUAL>                CheckM2 quality file (quality_report.tsv);
-                                   run automatically if omitted
-
-Species-level ANI criteria:
-      --species-ani <FLOAT>        ANI threshold for species-level clustering (%) [default: 95]
-      --species-alignedfrac <FLOAT>
-                                   Minimum aligned fraction for species-level clustering (%) [default: 50]
-
-Input:
-  -b, --bindir <BINDIR>            Directory containing FASTA files of bins
-  -f, --format <FORMAT>            Bin file extension [default: fasta]
-      --split                      Split bins by sample ID before processing
-      --isolate-genomes <FILE>     File listing isolate genomes; prioritized as representatives
-      --anifile <ANIFILE>          Pre-computed skani ANI file
-                                   (skani triangle <bindir> -E -o <anifile>)
-
-Representative selection:
-      --sensitive                  Select representatives based on high ANI connectivity
-                                   instead of quality score (no reassembly)
-
-Output:
-  -o, --outdir <OUTPUT>            Output directory [default: specieslevel_customdb/]
-  -t, --threads <THREADS>          Number of threads [default: 8]
-```
+### Options
+    -b, --bindir <BINDIR>
+            Directory containing fasta files of bins
+    -g, --gtdbtk <GTDBTK>
+            GTDB-Tk classification summary file
+    -q, --qual <QUAL>
+            Quality file produced by CheckM2 (quality_report.tsv)
+        --isolate-genomes <ISOLATE_GENOMES>
+            File listing isolate genomes in the input bins; these are prioritized as species representatives
+        --sensitive
+            Select representatives based on high connectivity. Bin merging and reassembly steps are disabled
+        --species-ani <SPECIES_ANI>
+            ANI for clustering bins (%), as per GTDB-Tk criteria [default: 95]
+        --species-alignedfrac <SPECIES_ALIGNEDFRAC>
+            Minimum aligned fraction (%) for species-level clustering, as per GTDB-Tk criteria [default: 50]
+    -c, --completeness <COMPLETENESS_CUTOFF>
+            Minimum completeness of bins (%) [default: 90]
+    -p, --purity <PURITY_CUTOFF>
+            Purity cutoff for custom database generation (%) [default: 5]
+    -t, --threads <THREADS>
+            Number of threads to use [default: 8]
+        --split
+            Split clusters into sample-wise bins before processing
+    -f, --format <FORMAT>
+            Bin file extension [default: fasta]
+        --anifile <ANIFILE>
+            ANI file produced by skani using command: skani triangle <bindir> -E -o <anifile>
+    -o, --outdir <OUTPUT>
+            Directory of output
+    -h, --help
+            Print help
 
 ### How representatives are selected
 
