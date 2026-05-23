@@ -1,10 +1,16 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::fs::{self, read_to_string, File};
+use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Write};
 use std::process::exit;
-use std::sync::{Arc, Mutex};
-use log::error;
+use std::sync::Arc;
+use dashmap::DashMap;
+use log::{error, info};
+use rayon::prelude::*;
+use rayon::ThreadPool;
+
+
+
 
 // Helper function
 pub fn validate_path<'a>(path: Option<&'a PathBuf>, name: &'a str, suffix: &str) -> &'a PathBuf {
@@ -164,6 +170,50 @@ pub fn splitbysampleid(
     Ok(())
 }
 
+// Split bins by sample id and return the directory containing split bins.
+pub fn split_bins_by_sample(
+    parentdir: &Path,
+    binfiles: &[PathBuf],
+    format: &str,
+    pool: &ThreadPool,
+) -> io::Result<PathBuf> {
+    let samplewisebinspath = parentdir.join("samplewisebins");
+    if samplewisebinspath.exists() {
+        fs::remove_dir_all(&samplewisebinspath)?;
+    }
+    fs::create_dir(&samplewisebinspath)?;
+
+    pool.install(|| {
+        binfiles
+            .par_iter()
+            .filter_map(|bin| bin.canonicalize().ok())
+            .filter(|bin| {
+                if bin.exists() {
+                    true
+                } else {
+                    error!("Bin file does not exist: {:?}", bin);
+                    false
+                }
+            })
+            .for_each(|bin| {
+                let bin_name = bin
+                    .file_stem()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default();
+                if let Err(e) = splitbysampleid(&bin, bin_name, &samplewisebinspath, format) {
+                    error!("Failed to split bin {:?}: {}", bin, e);
+                }
+            });
+    });
+
+    info!(
+        "splitting bins by sample {:?} is completed",
+        samplewisebinspath
+    );
+    Ok(samplewisebinspath)
+}
+
+
 // Helper function
 pub fn extract_sample_id(line: &str) -> io::Result<String> {
     if let Some(idx) = line.find('C') {
@@ -185,20 +235,9 @@ pub fn ensure_writer(
     format: &str,
     writers: &mut HashMap<String, File>,
 ) -> io::Result<()> {
-    if !writers.contains_key(sample_id) {
-        let output_filename = 
-            binspecificdir
-            .join(
-            format!("{}_{}.{}"
-            ,bin_name,sample_id,
-            format)
-        );
-        let output_file =
-            File::create(output_filename)?;
-        writers.insert(
-        sample_id
-        .to_string()
-        , output_file);
+    if let std::collections::hash_map::Entry::Vacant(e) = writers.entry(sample_id.to_string()) {
+        let output_filename = binspecificdir.join(format!("{}_{}.{}", bin_name, sample_id, format));
+        e.insert(File::create(output_filename)?);
     }
     Ok(())
 }
@@ -207,16 +246,55 @@ pub fn ensure_writer(
 pub fn assign_members(
     component: &HashSet<String>,
     rep: &str,
-    memberships_map: &Arc<Mutex<HashMap<String, String>>>,
+    memberships_map: &Arc<DashMap<String, String>>,
 ) {
-    if let Ok(mut map) = memberships_map.lock() {
-        let rep_s = rep.to_string();
-        for m in component.iter() {
-            // member -> representative
-            map.insert(m.clone(), rep_s.clone());
-        }
+    let rep_s = rep.to_string();
+    for m in component.iter() {
+        memberships_map.insert(m.clone(), rep_s.clone());
     }
 }
+
+pub fn rep_members_from_member_rep(
+    member_to_rep: &HashMap<String, String>,
+) -> HashMap<String, Vec<String>> {
+    let mut rep_to_members: HashMap<String, Vec<String>> = HashMap::new();
+
+    for (member, rep) in member_to_rep {
+        let members = rep_to_members.entry(rep.clone()).or_default();
+        if member != rep {
+            members.push(member.clone());
+        }
+    }
+
+    rep_to_members
+}
+
+// Write membership tsv file, rep\tmember1,member2,member3
+pub fn write_membership_file(
+    memberships_map: &HashMap<String, Vec<String>>,
+    output_path: &Path,
+) -> io::Result<()> {
+    let output_file = File::create(output_path)?;
+    let mut writer = io::BufWriter::new(output_file);
+    let mut representatives: Vec<&String> = memberships_map.keys().collect();
+    representatives.sort_unstable();
+
+    writeln!(writer, "#representative\tmember_genomes")?;
+    for rep in representatives {
+        if let Some(members) = memberships_map.get(rep) {
+            let mut members = members.clone();
+            members.sort_unstable();
+            members.dedup();
+            writeln!(writer, "{}\t{}", rep, members.join(","))?;
+        } else {
+            writeln!(writer, "{}\t", rep)?;
+        }
+    }
+
+    info!("Membership details are written to {:?}", output_path);
+    Ok(())
+}
+
 
 // Helper function
 pub fn write_line_to_file(
@@ -233,14 +311,13 @@ pub fn write_line_to_file(
 
 // Helper function
 pub fn read_fasta(fasta_file: &str) -> io::Result<HashSet<String>> {
-    let content = read_to_string(fasta_file)?;
+    let reader = BufReader::new(File::open(fasta_file)?);
     let mut scaffolds = HashSet::new();
-    for line in content.lines() {
-        if line.starts_with(">") {
-            let scaffold_name = line.trim_start_matches(">")
-                .split_whitespace()
-                .next()
-                .unwrap_or(line.trim_start_matches(">"));
+    for line in reader.lines() {
+        let line = line?;
+        if line.starts_with('>') {
+            let rest = &line[1..];
+            let scaffold_name = rest.split_whitespace().next().unwrap_or(rest);
             scaffolds.insert(scaffold_name.to_string());
         }
     }

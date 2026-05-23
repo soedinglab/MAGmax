@@ -1,6 +1,6 @@
 [package]
 name="magmax"
-version="1.3.0"
+version="1.4.0"
 authors=["Yazhini A <yazhini@mpinat.mpg.de>", "Johannes Soeding <soeding@mpinat.mpg.de>"]
 edition = "2021"
 description = "MAGmax: A tool to MAXimize the yield of Metagenome-Assembled Genomes (MAGs) through bin merging and resssembly."
@@ -22,6 +22,7 @@ hashbrown = "0.15"
 memmap2 = "0.9"
 seq_io = "0.3"
 which = "8.0"
+dashmap = "6"
 
 [profile.release]
 lto = "fat"
@@ -31,4 +32,3 @@ opt-level = 3
 [profile.dev]
 opt-level = 1
 debug = true
-

@@ -4,9 +4,10 @@ use std::path::{Path, PathBuf};
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Write};
 use std::process::{exit, Command as ProcessCommand, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use dashmap::DashMap;
 use log::{error, warn};
-use crate::assess::{assess_bins, parse_bins_quality, BinQuality};
+use crate::assess::{assess_bins, parse_bins_quality, quality_score, BinQuality};
 
 /// Reassemble merged bin
 pub fn run_reassembly(
@@ -21,7 +22,7 @@ pub fn run_reassembly(
     bindir: &PathBuf,
     component: &HashSet<String>,
     bin_qualities: &HashMap<String, BinQuality>,
-    merged_bin_quality: &Arc<Mutex<HashMap<String, BinQuality>>>,
+    merged_bin_quality: &Arc<DashMap<String, BinQuality>>,
     completeness_cutoff: f32,
     contamination_cutoff: f32,
     format: &str,
@@ -62,8 +63,8 @@ pub fn run_reassembly(
     
     let selected_quality_score = selected_completeness
     .zip(selected_contamination)
-    .map(|(completeness, contamination)| completeness - (5.0 * contamination))
-    .unwrap_or(completeness_cutoff - (5.0 * contamination_cutoff));
+    .map(|(c, cont)| quality_score(c, cont))
+    .unwrap_or_else(|| quality_score(completeness_cutoff, contamination_cutoff));
 
     if let Err(e) = command_status {
         error!("Assembler failed: {}", e);
@@ -95,7 +96,7 @@ pub fn run_reassembly(
         if let Ok(mut bin_quality_map) = 
             parse_bins_quality(&merged_checkm2_output) {
             if let Some((_, bin_quality)) = bin_quality_map.drain().next() {
-                let quality_score = bin_quality.completeness - (5.0 * bin_quality.contamination);
+                let quality_score = bin_quality.score();
                 if bin_quality.contamination < contamination_cutoff
                     && bin_quality.completeness >= completeness_cutoff
                     && quality_score > selected_quality_score
@@ -106,16 +107,8 @@ pub fn run_reassembly(
                         id,
                         format)
                     ));
-                    match merged_bin_quality.lock() {
-                        Ok(mut mergedbin_quality_map) => {
-                            mergedbin_quality_map.insert(format!("{}_merged", id), bin_quality);
-                            return Some(format!("{}_merged", id));
-                        },
-                        Err(e) => {
-                            warn!("Error locking the mutex: {}", e);
-                            return None;
-                        }
-                    }
+                    merged_bin_quality.insert(format!("{}_merged", id), bin_quality);
+                    return Some(format!("{}_merged", id));
                 } else {
                     return select_bestqualitybin(
                         selected_bin,
@@ -165,9 +158,15 @@ fn run_spades(
 ) -> std::io::Result<()> {
 
     
-    let spades = which::which("spades.py").map_err(|_| {
-        io::Error::new(io::ErrorKind::NotFound, "`spades.py` not found in PATH")
-    })?;
+    // Cache the spades path lookup — which::which does a full PATH scan
+    static SPADES: std::sync::OnceLock<Result<std::path::PathBuf, String>> =
+        std::sync::OnceLock::new();
+    let spades = SPADES
+        .get_or_init(|| {
+            which::which("spades.py").map_err(|_| "`spades.py` not found in PATH".to_string())
+        })
+        .as_ref()
+        .map_err(|e| io::Error::new(io::ErrorKind::NotFound, e.as_str()))?;
 
     let mut cmd = ProcessCommand::new(spades);
 
@@ -255,7 +254,8 @@ fn filterscaffold(input_file: &PathBuf) -> io::Result<()> {
             input_file.display())),
     };
     let input = File::open(input_file)?;
-    let mut output = File::create(&output_file)?;
+    let output = File::create(&output_file)?;
+    let mut output = io::BufWriter::new(output);
     let reader = BufReader::new(input);
 
     let mut current_header = String::new();
@@ -299,8 +299,8 @@ pub fn find_bestqualitybin(
     .filter(|(_, completeness, _)| *completeness >= completeness_cutoff)
     .max_by(|(bin1, completeness1, contamination1),
         (bin2, completeness2, contamination2)| {
-        let score1 = completeness1 - (5.0 * contamination1);
-        let score2 = completeness2 - (5.0 * contamination2);
+        let score1 = quality_score(*completeness1, *contamination1);
+        let score2 = quality_score(*completeness2, *contamination2);
 
         score1
         .total_cmp(&score2)
@@ -327,6 +327,7 @@ pub fn select_bestqualitybin(
         if !output_file.exists() {
             if let Err(e) = fs::copy(&bin_path, &output_file) {
                 error!("Failed to copy {}: {}", bin_id, e);
+                return None;
             }
         }
         return Some(bin_id.to_string());

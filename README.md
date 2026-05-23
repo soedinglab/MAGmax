@@ -39,6 +39,14 @@ Sensitive mode selects representative genomes based on high-ANI connectivity tha
 
 Benchmarking results comparing the default --no-reassembly and --sensitive modes are available in [sensitive_mode.md](https://github.com/soedinglab/MAGmax/blob/main/sensitive.md).
 
+## Generate custom species-level database
+MAGmax provides a `customdb` subcommand to build a species-level non-redundant genome database by combining GTDB-Tk taxonomic classification with ANI-based dereplication. Bins confidently assigned to a known GTDB-Tk species are grouped by species and one representative is selected per species. Remaining unclassified bins are dereplicated by ANI clustering, enabling discovery of novel species. Isolate genomes can be prioritized as representatives using `--isolate-genomes`.
+
+[!NOTE]
+For a step-by-step guide, see the [tutorial](https://github.com/soedinglab/MAGmax/blob/main/generate_customdatabase.md).
+
+    magmax customdb -g gtdbtk.summary.tsv -b <binsdir> -q quality_report.tsv -t 24
+
 ## Installation
 ### Prerequisites
 
@@ -169,7 +177,6 @@ To fix, use the below bash command
 2. If input bins are not separated by sample IDs (e.g., when using MetaBAT2 or COMEBin on concatenated contigs), use the `--split` option to let MAGmax automatically separate bins by sample ID.
 
 3. We recommend Spades for reassembly which produces bins with higher purity than bins assembled using Megahit.
-
 
 MAGmax is stricter than Galah in dereplicating bins and exhibits similar computational efficiency on large dataset. For more details, see [magmax_vs_galah.md](https://github.com/soedinglab/MAGmax/blob/main/magmax_vs_galah.md).
 

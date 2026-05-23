@@ -3,24 +3,26 @@ use petgraph::graph::{Graph};
 use petgraph::graph::NodeIndex;
 use petgraph::{Undirected};
 use rayon::prelude::*;
+use crate::assess::BinQuality;
+use crate::merge::AniData;
 
 // Get clique clusters
 pub fn split_component_into_cliques(
     component: HashSet<u32>,
-    ani_details: &HashMap<(u32, u32), f32>,
+    ani_map: &HashMap<(u32, u32), AniData>,
     ani_cutoff: f32,
     aligned_frac: f32,
-    af_ref: &HashMap<(u32, u32), f32>,
-    af_query: &HashMap<(u32, u32), f32>,
+    id_to_name: &[String],
+    bin_qualities: &HashMap<String, BinQuality>,
+    isolate_genomes: &HashSet<String>,
+    no_reassembly: bool,
 ) -> Vec<HashSet<u32>> {
 
     let adj = build_adj(
         &component,
-        ani_details,
+        ani_map,
         ani_cutoff,
         aligned_frac,
-        af_ref,
-        af_query
     );
 
     let mut remaining = component;
@@ -105,13 +107,15 @@ pub fn split_component_into_cliques(
 
     let final_subclusters = connect_singletons_to_cliques(
         subclusters,
-        ani_details,
+        ani_map,
         ani_cutoff,
         aligned_frac,
-        af_ref,
-        af_query
+        id_to_name,
+        bin_qualities,
+        isolate_genomes,
+        no_reassembly,
     );
-    
+
     final_subclusters
 }
 
@@ -128,36 +132,30 @@ fn bron_kerbosch(
         return;
     }
 
-    let pivot = p.iter()
-        .chain(x.iter()).next().copied().unwrap(); // Choose a pivot
-    let neighbors: HashSet<NodeIndex> = graph
-        .neighbors(pivot)
+    // Tomita pivot: pick u in P∪X maximising |N(u) ∩ P| to minimise recursive calls
+    let p_set: HashSet<NodeIndex> = p.iter().copied().collect();
+    let pivot = p
+        .iter()
+        .chain(x.iter())
+        .copied()
+        .max_by_key(|&u| graph.neighbors(u).filter(|n| p_set.contains(n)).count())
+        .unwrap();
+    let pivot_neighbors: HashSet<NodeIndex> = graph.neighbors(pivot).collect();
+
+    // Only recurse on vertices not adjacent to the pivot
+    let candidates: Vec<NodeIndex> = p
+        .iter()
+        .copied()
+        .filter(|v| !pivot_neighbors.contains(v))
         .collect();
 
-    let mut candidates: Vec<NodeIndex> = Vec::new();
-    
-    for &v in p.iter() {
-        if !neighbors.contains(&v) {
-            candidates.push(v);
-        }
-    }
-    
     for v in candidates {
         r.push(v);
 
-        let mut p_next: Vec<NodeIndex> = Vec::new();
-
-        for &u in p.iter() {
-            if graph.contains_edge(v, u) {
-                p_next.push(u);
-            }
-        }
-        let mut x_next: Vec<NodeIndex> = Vec::new();
-        for &u in x.iter() {
-            if graph.contains_edge(v, u) {
-                x_next.push(u);
-            }
-        }
+        // Build v's neighbor set once — O(1) membership checks replace O(degree) contains_edge
+        let v_neighbors: HashSet<NodeIndex> = graph.neighbors(v).collect();
+        let mut p_next: Vec<NodeIndex> = p.iter().copied().filter(|u| v_neighbors.contains(u)).collect();
+        let mut x_next: Vec<NodeIndex> = x.iter().copied().filter(|u| v_neighbors.contains(u)).collect();
 
         bron_kerbosch(graph, r, &mut p_next, &mut x_next, cliques);
         r.pop();
@@ -171,35 +169,39 @@ fn bron_kerbosch(
 
 fn build_adj(
     component: &HashSet<u32>,
-    ani_details: &HashMap<(u32, u32), f32>,
+    ani_map: &HashMap<(u32, u32), AniData>,
     ani_cutoff: f32,
     aligned_frac: f32,
-    af_ref: &HashMap<(u32, u32), f32>,
-    af_query: &HashMap<(u32, u32), f32>,
 ) -> HashMap<u32, HashSet<u32>> {
     let mut adj: HashMap<u32, HashSet<u32>> = HashMap::new();
-
     for &id in component {
         adj.entry(id).or_default();
     }
 
     let ids: Vec<u32> = component.iter().copied().collect();
-    for i in 0..ids.len() {
-        for j in (i + 1)..ids.len() {
+
+    // Collect valid edges in parallel, then insert sequentially
+    let edges: Vec<(u32, u32)> = (0..ids.len())
+        .into_par_iter()
+        .flat_map(|i| {
             let id1 = ids[i];
-            let id2 = ids[j];
+            ((i + 1)..ids.len())
+                .filter_map(|j| {
+                    let id2 = ids[j];
+                    let key = if id1 <= id2 { (id1, id2) } else { (id2, id1) };
+                    let data = ani_map.get(&key)?;
+                    (data.ani >= ani_cutoff
+                        && data.af_ref >= aligned_frac
+                        && data.af_query >= aligned_frac)
+                        .then_some((id1, id2))
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
 
-            let key = if id1 <= id2 { (id1, id2) } else { (id2, id1) };
-            
-            let Some(&ani) = ani_details.get(&key) else { continue; };
-            let af_r = af_ref.get(&key).copied().unwrap_or(0.0);
-            let af_q = af_query.get(&key).copied().unwrap_or(0.0);
-
-            if ani >= ani_cutoff && af_r >= aligned_frac && af_q >= aligned_frac {
-                adj.get_mut(&id1).unwrap().insert(id2);
-                adj.get_mut(&id2).unwrap().insert(id1);
-            }
-        }
+    for (id1, id2) in edges {
+        adj.get_mut(&id1).unwrap().insert(id2);
+        adj.get_mut(&id2).unwrap().insert(id1);
     }
 
     adj
@@ -277,17 +279,18 @@ fn build_subgraph_for_ids(
             }
         }
     }
-
     subgraph
 }
 
 fn connect_singletons_to_cliques(
     clusters: Vec<HashSet<u32>>,
-    ani_details: &HashMap<(u32, u32), f32>,
+    ani_map: &HashMap<(u32, u32), AniData>,
     ani_cutoff: f32,
     aligned_frac: f32,
-    af_ref: &HashMap<(u32, u32), f32>,
-    af_query: &HashMap<(u32, u32), f32>
+    id_to_name: &[String],
+    bin_qualities: &HashMap<String, BinQuality>,
+    isolate_genomes: &HashSet<String>,
+    no_reassembly: bool,
 ) -> Vec<HashSet<u32>> {
 
     // Split into multi-node cliques & singleton nodes
@@ -304,54 +307,120 @@ fn connect_singletons_to_cliques(
         }
     }
 
+    // Return (id, quality_score, is_isolate) for the best bin in a clique.
+    // Isolate bins are always preferred over non-isolates; ties broken by quality score.
+    let best_bin_of = |clique: &HashSet<u32>| -> (u32, f32, bool) {
+        clique
+            .iter()
+            .copied()
+            .map(|id| {
+                let name = &id_to_name[id as usize];
+                let score = bin_qualities.get(name).map_or(0.0, |q| q.score());
+                let is_isolate = isolate_genomes.contains(name);
+                (id, score, is_isolate)
+            })
+            .max_by(|(_, s1, i1), (_, s2, i2)| match (i1, i2) {
+                (true, false) => std::cmp::Ordering::Greater,
+                (false, true) => std::cmp::Ordering::Less,
+                _ => s1.total_cmp(s2),
+            })
+            .unwrap_or((*clique.iter().next().unwrap(), 0.0, false))
+    };
+
+    // Returns true if (a_score, a_is_isolate) beats (b_score, b_is_isolate),
+    // mirroring the priority rule used in MWIDS: isolate > non-isolate, then quality.
+    let beats = |a_score: f32, a_iso: bool, b_score: f32, b_iso: bool| -> bool {
+        (a_iso && !b_iso) || (a_iso == b_iso && a_score > b_score)
+    };
+
     let mut leftover_singletons: Vec<HashSet<u32>> = Vec::new();
 
     for node in singletons {
-        let mut qualified_cliques = Vec::new();
+        let node_name = &id_to_name[node as usize];
+        let node_score = bin_qualities.get(node_name).map_or(0.0, |q| q.score());
+        let node_is_isolate = isolate_genomes.contains(node_name);
 
-        // Check which cliques this node can join
+        // A clique qualifies when its best representative has a passing ANI + AF
+        // link to the query singleton.
+        // Each entry: (clique_index, ani_to_best_bin, best_bin_score, best_bin_is_isolate)
+        let mut qualified_cliques: Vec<(usize, f32, f32, bool)> = Vec::new();
+
         for (i, clique) in cliques.iter().enumerate() {
+            let (best_id, best_score, best_is_isolate) = best_bin_of(clique);
+            
             let mut all_ok = true;
-
             for &member in clique.iter() {
-
-                let key = if node <= member { (node, member) } else { (member, node) };
-
-                let ani = ani_details.get(&key).copied().unwrap_or(0.0);
-                let af_r = af_ref.get(&key).copied().unwrap_or(0.0);
-                let af_q = af_query.get(&key).copied().unwrap_or(0.0);
-
+                let key_m = if node <= member { (node, member) } else { (member, node) };
+                let (ani, af_r, af_q) = ani_map.get(&key_m)
+                    .map(|d| (d.ani, d.af_ref, d.af_query))
+                    .unwrap_or((0.0, 0.0, 0.0));
                 if ani < ani_cutoff || af_r < aligned_frac || af_q < aligned_frac {
                     all_ok = false;
                     break;
                 }
             }
-
             if all_ok {
-                qualified_cliques.push(i);
+                // Use best bin's ANI for tie-breaking in the multi-clique case.
+                let key = if node <= best_id { (node, best_id) } else { (best_id, node) };
+                let best_ani = ani_map.get(&key).map_or(0.0, |d| d.ani);
+                qualified_cliques.push((i, best_ani, best_score, best_is_isolate));
             }
         }
 
         match qualified_cliques.len() {
             0 => {
-                // stays singleton
+                // No clique representative links to this singleton — independent cluster.
                 leftover_singletons.push(HashSet::from([node]));
             }
             1 => {
-                // exactly one match → glue into that one clique
-                let idx = qualified_cliques[0];
-                cliques[idx].insert(node);
+                // Exactly one potential clique — join it directly.
+                cliques[qualified_cliques[0].0].insert(node);
             }
             _ => {
-                // attaches to ALL qualifying cliques
-                for &idx in &qualified_cliques {
-                    cliques[idx].insert(node);
+                // Multiple potential cliques. The query merges them all when it quality is best
+                // among these cliques representatives; otherwise it joins the closest one.
+                if no_reassembly{
+                    let query_is_best = qualified_cliques.iter().all(|&(_, _, best_score, best_iso)| {
+                        beats(node_score, node_is_isolate, best_score, best_iso)
+                    });
+
+                    if query_is_best {
+                        // Query is the highest quality bin, merge all potential cliques
+                        // into one and add the query.
+                        let mut indices: Vec<usize> =
+                            qualified_cliques.iter().map(|&(i, _, _, _)| i).collect();
+                        // Process highest indices first so swap_remove doesn't
+                        // invalidate the remaining indices.
+                        indices.sort_unstable_by(|a, b| b.cmp(a));
+                        let mut merged: HashSet<u32> = HashSet::from([node]);
+                        for idx in indices {
+                            merged.extend(cliques.swap_remove(idx));
+                        }
+                        cliques.push(merged);
+                    } else {
+                        // Query is not the best, so assign it to the clique whose
+                        // representative has the highest ANI to the query.
+                        // Ties are broken by clique size (larger is better).
+                        let best_idx = qualified_cliques
+                            .iter()
+                            .max_by(|&(ia, ani_a, _, _), &(ib, ani_b, _, _)| {
+                                ani_a
+                                    .total_cmp(ani_b)
+                                    .then_with(|| cliques[*ia].len().cmp(&cliques[*ib].len()))
+                            })
+                            .map(|&(i, _, _, _)| i)
+                            .unwrap();
+                        cliques[best_idx].insert(node);
+                    }
+                } else {
+                    for &(idx, _, _, _) in &qualified_cliques {
+                        cliques[idx].insert(node);
+                    }
                 }
             }
         }
     }
 
-    // return cliques + leftover singletons
     cliques.extend(leftover_singletons);
     cliques
 }
