@@ -1,4 +1,4 @@
-## Generate custom species-level database
+## Tutorial: generate custom species-level database
 
 Genome dereplication is not always perfect due to inherent limitations of hierarchical clustering algorithms used in dereplication tools (dRep and Galah). Alternatively, taxonomic classification using GTDBtk followed by grouping genomes by taxonomy assignment is another option for dereplication, but it has limitations too: 1) ANI radius of under-represented species may be inaccurate, causing wrong taxonomy labeling; 2) novel species cannot be assigned. Combining dereplication and taxonomic classification can enhance the discovery of novel species with improved accuracy.
 
