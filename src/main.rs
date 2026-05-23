@@ -23,8 +23,9 @@ mod customdb;
 
 // check for valid input paths
 fn validate_paths(cli: &Cli) -> io::Result<(PathBuf, PathBuf, PathBuf)> {
-    let bindir = utility::validate_path(
-        Some(&cli.bindir), "bindir", &cli.format);
+
+    let bindir = utility::validate_path(cli.bindir.as_ref(), 
+        "bindir", &cli.format);
 
     if cli.no_reassembly || cli.sensitive {
         Ok((bindir.to_path_buf(), PathBuf::new(), PathBuf::new()))
@@ -53,7 +54,7 @@ struct Cli {
 
     /// Directory containing fasta files of bins
     #[arg(short = 'b', long = "bindir", help = "Directory containing fasta files of bins")]
-    bindir: PathBuf,
+    bindir: Option<PathBuf>,
 
     /// Directory containing read files
     #[arg(short = 'r', long = "readdir", help = "Directory containing read files",
@@ -115,7 +116,14 @@ struct Cli {
     #[arg(long = "anifile",
     help = "ANI file produced by skani using command: skani triangle <bindir> -E -o <anifile>")]
     anifile: Option<PathBuf>,
-    
+
+    /// File listing isolate genomes present in the input bin directory
+    #[arg(
+        long = "isolate-genomes",
+        help = "File listing isolate genomes in the input bins; these are prioritized as representatives"
+    )]
+    isolate_genomes: Option<PathBuf>,
+
     /// Directory of output
     #[arg(short = 'o', long = "outdir", help = "Directory of output")]
     output: Option<PathBuf>,
@@ -131,7 +139,6 @@ fn main() -> io::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let cli = Cli::parse();
 
-    // call customdb subcommand
     if let Some(command) = cli.command {
         return match command {
             Commands::Customedb(args) => customdb::run(&args),
@@ -153,6 +160,7 @@ fn main() -> io::Result<()> {
     let anifile = cli.anifile;
     let mut no_reassembly = cli.no_reassembly;
     let sensitive = cli.sensitive;
+    let isolate_genomes_path = cli.isolate_genomes;
     let parentdir = bindir.parent().map(PathBuf::from).unwrap_or_else(|| bindir.clone());
     
     // Output directory
@@ -191,6 +199,15 @@ fn main() -> io::Result<()> {
                 assembler);
             exit(1);
         }
+    }
+
+    let isolate_genomes = customdb::read_isolate_genomes(isolate_genomes_path.as_deref())
+        .unwrap_or_else(|e| {
+            warn!("Failed to read isolate genomes file: {}", e);
+            HashSet::new()
+        });
+    if !isolate_genomes.is_empty() {
+        info!("  🔹 Isolate genomes: {} loaded (these will be prioritized as representatives)", isolate_genomes.len());
     }
 
     if sensitive {
@@ -248,12 +265,24 @@ fn main() -> io::Result<()> {
                 let bin_name = bin.file_stem()
                     .and_then(|name| name.to_str())
                     .unwrap_or_default();
-                utility::splitbysampleid(
-                    &bin,
-                    bin_name,
-                    &samplewisebinspath,
-                    &format)
-                .ok();
+
+                if isolate_genomes.contains(bin_name) {
+                    // Isolate genome contigs have no sample-ID prefix in their
+                    // headers, so splitting by 'C' separator would fail. Copy
+                    // the file directly so it retains its original name and
+                    // remains matchable against the isolate_genomes set.
+                    let dest = samplewisebinspath.join(format!("{}.{}", bin_name, format));
+                    if let Err(e) = fs::copy(&bin, &dest) {
+                        error!("Failed to copy isolate genome {:?} to samplewisebins: {}", bin, e);
+                    }
+                } else {
+                    utility::splitbysampleid(
+                        &bin,
+                        bin_name,
+                        &samplewisebinspath,
+                        &format)
+                    .ok();
+                }
             });
         });
         bindir = samplewisebinspath;
@@ -380,6 +409,7 @@ fn main() -> io::Result<()> {
             &id_to_node,
             &bin_qualities,
             &resultdir,
+            &isolate_genomes,
         );
 
         for bin in representative_bins {
@@ -400,6 +430,9 @@ fn main() -> io::Result<()> {
         ani_cutoff,
         &id_to_name,
         alignedfrac,
+        &bin_qualities,
+        &isolate_genomes,
+        no_reassembly,
     );
     
     // Collect completeness and purity of merged and reassembled bins
@@ -414,7 +447,7 @@ fn main() -> io::Result<()> {
         // Each component runs a subprocess (SPAdes/CheckM2) that spawns its own OS threads.
         // Dividing by the number of components bounds total threads to ~`threads` regardless
         // of how many components Rayon schedules concurrently.
-        let subprocess_threads = (threads / connected_bins.len()).max(1);
+        let subprocess_threads = (threads / connected_bins.len().max(1)).max(1);
 
         pool.install(|| {
         connected_bins
@@ -475,6 +508,7 @@ fn main() -> io::Result<()> {
                 completeness_cutoff,
                 &memberships_map,
                 id,
+                &isolate_genomes,
             )
             .map_err(|e| {
                 error!("Error processing bin {:?}: {}", component, e);
@@ -523,11 +557,10 @@ fn process_components(
     completeness_cutoff: f32,
     memberships_map: &Arc<DashMap<String, String>>,
     id: usize,
+    isolate_genomes: &HashSet<String>,
 ) -> io::Result<()> {
 
-    // eg: comp = {"binname_S1", "binname_S2"}
-
-    // Singleton cluster, save the bin in the output
+    // Singleton cluster — copy if it passes completeness cutoff.
     if component.len() == 1 {
         let binname = component.iter().next().expect("The component is empty.");
         if let Some(quality) = bin_qualities.get(binname) {
@@ -537,37 +570,49 @@ fn process_components(
                 if let Err(e) = fs::copy(&bin_path, &final_path) {
                     error!("Failed to copy from {:?} to {:?}: {}", bin_path, final_path, e);
                 }
-                utility::assign_members(component, &binname, memberships_map);
+                utility::assign_members(component, binname, memberships_map);
             }
         }
         return Ok(());
     }
     debug!("Processing component ID: {}, bins: {:?}", id, component);
 
-    // Check if the cluster has already a high-quality bin (>90% comp, <5% cont)
-    if let Some(binname) = assess::check_high_quality_bin(
-        &component, &bin_qualities, bindir, resultdir, &format, completeness_cutoff) {
-            utility::assign_members(component, &binname, memberships_map);
-        return Ok(());
-    } // edit here to select representative based on connectivity
+    // If isolate genomes are present in this component, prioritize them as the
+    // representative regardless of whether a higher-quality MAG exists.
+    if !isolate_genomes.is_empty() {
+        let best_isolate = component
+            .iter()
+            .filter(|bin| isolate_genomes.contains(*bin))
+            .filter_map(|bin| bin_qualities.get(bin).map(|q| (bin, q)))
+            .max_by(|(_, q1), (_, q2)| q1.score().total_cmp(&q2.score()))
+            .map(|(bin, _)| bin.clone());
 
-    let selected_bin = 
-        reassemble::find_bestqualitybin(
-            component,
-            bin_qualities,
-            completeness_cutoff
-        )
+        if let Some(binname) = best_isolate {
+            let bin_path = bindir.join(format!("{}.{}", binname, format));
+            let final_path = resultdir.join(format!("{}.{}", binname, format));
+            if let Err(e) = fs::copy(&bin_path, &final_path) {
+                error!("Failed to copy from {:?} to {:?}: {}", bin_path, final_path, e);
+            }
+            utility::assign_members(component, &binname, memberships_map);
+            return Ok(());
+        }
+    }
+
+    // Check if the cluster has already a high-quality bin (>90% comp, <5% cont).
+    if let Some(binname) = assess::check_high_quality_bin(
+        component, bin_qualities, bindir, resultdir, format, completeness_cutoff,
+    ) {
+        utility::assign_members(component, &binname, memberships_map);
+        return Ok(());
+    }
+
+    let selected_bin = reassemble::find_bestqualitybin(component, bin_qualities, completeness_cutoff)
         .map(|(bin_name, _, _)| bin_name);
 
-
-    if let Some(binname) = reassemble::select_bestqualitybin(
-        selected_bin,
-        bindir,
-        resultdir,
-        format) { // edit here to select representative based on connectivity
+    if let Some(binname) = reassemble::select_bestqualitybin(selected_bin, bindir, resultdir, format) {
         utility::assign_members(component, &binname, memberships_map);
     }
-    return Ok(());
+    Ok(())
 }
 
 /// Process cluster in parallel

@@ -204,13 +204,16 @@ pub fn get_connected_samples(
     ani_cutoff: f32,
     id_to_name: &[String],
     alignedfrac: f32,
+    bin_qualities: &HashMap<String, BinQuality>,
+    isolate_genomes: &HashSet<String>,
+    no_reassembly: bool,
 ) -> Vec<HashSet<String>> {
-    
+
     let connected_components = compute_connected_components(graph);
 
     let mut connected_samples: Vec<HashSet<String>> = Vec::new();
     for component in connected_components {
-        if component.len() <=2 {
+        if component.len() <= 2 {
             let component_names: HashSet<String> = component
                 .into_iter()
                 .map(|id| id_to_name[id as usize].clone())
@@ -223,6 +226,10 @@ pub fn get_connected_samples(
                     ani_map,
                     ani_cutoff,
                     alignedfrac,
+                    id_to_name,
+                    bin_qualities,
+                    isolate_genomes,
+                    no_reassembly,
                 );
             for cluster in subclusters.drain(..) {
                 let component_names: HashSet<String> = cluster
@@ -243,8 +250,8 @@ pub fn combine_fastabins(
     combined_bins: &Path,
     format: &str,
 ) -> io::Result<()> {
+
     // Combine bins fasta into a single file
-    
     let out = File::create(combined_bins.join("combined.fasta"))?;
     let mut output_writer = BufWriter::new(out);
 
@@ -388,8 +395,8 @@ pub fn drep_finalbins(
         if !cfg!(debug_assertions) {
             if let Err(e) = remove_file(&ani_output) {
                 warn!("Failed to delete file {:?}: {}", ani_output, e);
+            }
         }
-    }
     }
 
     let updated_memberships = update_memberships_map(
@@ -476,6 +483,44 @@ pub fn drep_finalbins(
     writer.write_all(buffer.as_bytes())?;
     info!("Quality values of bins are written to {:?}", output_file_path);
     Ok(())
+}
+
+/// Deduplicates a set of representatives using the pre-computed ANI map.
+/// Returns an updated member→rep map with redundant representatives redirected to
+/// the better bin in each redundant pair.
+pub fn dedup_representatives(
+    ani_map: &HashMap<(u32, u32), AniData>,
+    id_to_name: &[String],
+    representative_set: &HashSet<String>,
+    bin_qualities: &HashMap<String, BinQuality>,
+    ani_cutoff: f32,
+    alignedfrac: f32,
+    member_to_rep: HashMap<String, String>,
+) -> HashMap<String, String> {
+    let mut bins_to_remove: HashSet<String> = HashSet::new();
+    let mut bins_pair: HashMap<String, String> = HashMap::new();
+
+    for (&(id1, id2), data) in ani_map.iter() {
+        let Some(bin1) = id_to_name.get(id1 as usize) else { continue; };
+        let Some(bin2) = id_to_name.get(id2 as usize) else { continue; };
+
+        if !representative_set.contains(bin1) || !representative_set.contains(bin2) {
+            continue;
+        }
+        if data.ani < ani_cutoff || data.af_ref < alignedfrac || data.af_query < alignedfrac {
+            continue;
+        }
+
+        let Some(q1) = bin_qualities.get(bin1) else { continue; };
+        let Some(q2) = bin_qualities.get(bin2) else { continue; };
+
+        let worse_bin = find_worsebin(bin1.as_str(), bin2.as_str(), q1, q2);
+        let best_bin = if worse_bin == bin1 { bin2.as_str() } else { bin1.as_str() };
+        bins_to_remove.insert(worse_bin.to_string());
+        add_edge_keep_best(&mut bins_pair, worse_bin, best_bin, bin_qualities);
+    }
+
+    update_memberships_map(&member_to_rep, &bins_pair, &bins_to_remove)
 }
 
 // Run skani

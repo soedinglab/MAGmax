@@ -52,8 +52,8 @@ pub fn select_highconnectivity_bins(
     id_to_node: &HashMap<u32, NodeIndex>,
     bin_qualities: &HashMap<String, BinQuality>,
     result_dir: &Path,
+    isolate_genomes: &HashSet<String>,
 ) -> HashSet<String> {
-    let isolate_genomes = HashSet::new();
     let (rep_set, rep_members) = select_highconnectivity_bins_with_memberships(
         graph,
         ani_details,
@@ -61,7 +61,7 @@ pub fn select_highconnectivity_bins(
         id_to_name,
         id_to_node,
         bin_qualities,
-        &isolate_genomes,
+        isolate_genomes,
     );
 
     let _ = utility::write_membership_file(&rep_members, &result_dir.join("memberships.tsv"));

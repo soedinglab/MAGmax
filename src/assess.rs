@@ -116,7 +116,7 @@ pub fn filter_bins_quality(
     bin_qualities
         .iter()
         .filter(|(_, q)| {
-            q.completeness >= completeness_cutoff && q.contamination <= contamination_cutoff
+            q.completeness >= completeness_cutoff && q.contamination < contamination_cutoff
         })
         .map(|(bin, q)| (bin.clone(), q.clone()))
         .collect()
