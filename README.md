@@ -116,6 +116,8 @@ Option 3: Build from source
             Quality file produced by CheckM2 (quality_report.tsv)
         --anifile <ANIFILE>
             ANI file produced by skani using command: skani triangle <bindir> -E -o <anifile>
+        --isolate-genomes <ISOLATE_GENOMES>
+            File listing isolate genomes in the input bins; these are prioritized as representatives
     -o, --outdir <OUTPUT>
             Directory of output
         --assembler <ASSEMBLER>
@@ -175,8 +177,10 @@ To fix, use the below bash command
 1. User can provide a custom quality score file with bin ID, completeness and contamination columns in same format as CheckM2 tsv output.
 
 2. If input bins are not separated by sample IDs (e.g., when using MetaBAT2 or COMEBin on concatenated contigs), use the `--split` option to let MAGmax automatically separate bins by sample ID.
+   
+3. MAGmax can prioritize isolate genomes while selecting representatives per cluster. User can provide list of isolate genome bins using `isolate-genomes` option.
 
-3. We recommend Spades for reassembly which produces bins with higher purity than bins assembled using Megahit.
+4. We recommend Spades for reassembly which produces bins with higher purity than bins assembled using Megahit.
 
 MAGmax is stricter than Galah in dereplicating bins and exhibits similar computational efficiency on large dataset. For more details, see [magmax_vs_galah.md](https://github.com/soedinglab/MAGmax/blob/main/magmax_vs_galah.md).
 
