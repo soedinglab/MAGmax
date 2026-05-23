@@ -8,22 +8,18 @@ Genome dereplication is not always perfect due to inherent limitations of hierar
 
 The `magmax customdb` subcommand builds a species-level non-redundant genome database by combining two complementary strategies:
 
-1. **GTDB-Tk-guided dereplication** — bins that are confidently assigned to a known species (ANI ≥ species ANI radius and aligned fraction ≥ cutoff) are grouped by species name and one representative is chosen per species.
-2. **ANI-based dereplication of remaining bins** — bins that are unclassified or do not confidently hit a known species are clustered by ANI (default 95%), using the same graph-based approach as regular MAGmax dereplication.
+1. **GTDB-Tk-guided dereplication** — bins that are assigned to a known species (ANI ≥ species ANI radius and aligned fraction ≥ cutoff) are grouped by species name and one representative is chosen per species.
+2. **ANI-based dereplication of remaining bins** — bins that are unclassified by GTDB-Tk or are not assigned to a species (s__) are clustered by ANI (default 95%), using the same graph-based approach as regular MAGmax dereplication.
 
-The result is a combined set of representatives covering both known and novel species, each supported by a high-quality genome.
+The result is a combined set of representatives covering both known and novel species.
 
----
 
 ### Prerequisites
 
 All tools required for regular MAGmax runs plus:
 - **GTDB-Tk** — taxonomic classification of input bins (`gtdbtk classify_wf`).  
   Requires only the summary output file (`gtdbtk.bac120.summary.tsv` or equivalent).
-- **CheckM2** — genome quality assessment (run automatically if `-q` is not provided).
-- **skani** — pairwise ANI computation (run automatically; or provide a pre-computed file with `--anifile`).
 
----
 
 ### Typical workflow
 
@@ -103,8 +99,6 @@ magmax customdb \
     -t 32
 ```
 
----
-
 ### Input files
 
 | Input | Flag | Required | Description |
@@ -113,7 +107,7 @@ magmax customdb \
 | Bin directory | `-b` | Yes | Directory containing FASTA files of input bins |
 | CheckM2 quality | `-q` | No | `quality_report.tsv` from CheckM2; computed automatically if omitted |
 | Isolate genome list | `--isolate-genomes` | No | Plain text file, one genome name per line (with or without extension); these are prioritized as representatives |
-| Pre-computed ANI | `--anifile` | No | Output of `skani triangle <bindir> -E -o <anifile>`; computed automatically if omitted |
+| Pre-computed ANI | `--anifile` | No | Output of `skani triangle <bindir> -E -o <anifile>`; computed automatically if not given |
 
 #### GTDB-Tk summary columns used
 
@@ -142,7 +136,6 @@ isolate_genome_1           # with or without .fasta extension
 path/to/isolate_genome_2   # path prefix is stripped; only basename is used
 ```
 
----
 
 ### Output files
 
@@ -150,12 +143,11 @@ Output is written to `specieslevel_customdb/` by default (use `-o` to override),
 
 | File | Description |
 |------|-------------|
-| `gtdbtk_species_representatives.tsv` | Representatives selected from GTDB-Tk-classified (perfect) bins. Columns: `#gtdbtk_species_representative`, `species_name` |
-| `memberships.tsv` | All representatives and their cluster members (perfect + unclassified). Tab-separated: representative, then tab-separated member list |
+| `gtdbtk_species_representatives.tsv` | Representatives selected from GTDB-Tk-classified bins. Columns: `#gtdbtk_species_representative`, `species_name` |
+| `memberships.tsv` | All representatives and their cluster members (GTDB-Tk classified + unclassified). Tab-separated: representative, then a comma-separated member list |
 | `bins_checkm2_qualities.tsv` | Completeness and contamination of all final representatives. Columns: `#Bin`, `Completeness`, `Contamination` |
-| `unclassified_clusterrepresentatives_gtdbtkspecies_ani_connections.tsv` | ANI connections between novel-cluster representatives and GTDB-Tk species representatives that exceed the species ANI radius. Columns: `#unclassified_cluster_representative`, `gtdbtk_species_representative`, `ANI`, `species_ANI_radius`. Use this to check whether any unclassified representative might actually belong to a known species at higher ANI stringency. |
+| `unclassified_clusterrepresentatives_gtdbtkspecies_ani_connections.tsv` | ANI connections between representatives of novel-clusters and known species clusters that exceed the species ANI radius. Columns: `#unclassified_cluster_representative`, `gtdbtk_species_representative`, `ANI`, `species_ANI_radius`. It informs whether any unclassified representative might actually belong to a known species. |
 
----
 
 ### Options reference
 
@@ -193,34 +185,29 @@ Output:
   -t, --threads <THREADS>          Number of threads [default: 8]
 ```
 
----
-
 ### How representatives are selected
 
-**GTDB-Tk-classified (perfect) bins**
+**GTDB-Tk-classified known species bins**
 
 All bins assigned to the same GTDB-Tk species are grouped together. One representative is chosen per species:
 1. If isolate genomes are present among the species members, the isolate with the lowest contamination is preferred.
 2. Otherwise, the bin with the highest quality score (`completeness − 5 × contamination`) is selected.
 
-**Unclassified or novel-species (remaining) bins**
+**Unclassified or novel-species bins**
 
 Remaining bins are clustered by pairwise ANI (default 95%, aligned fraction ≥ 50%) using single-linkage (connected components). Within each cluster:
 - **Default mode**: selects the highest-quality bin (completeness ≥ 90% required; isolates are prioritized).
 - **Sensitive mode** (`--sensitive`): selects the bin with the highest weighted ANI connectivity (`Σ max(0, ANI − threshold)` over neighbors), favoring bins that are more similar to a larger number of neighbors.
 
-After initial selection, a deduplication step merges any two remaining representatives that are themselves redundant (ANI ≥ species cutoff), keeping the higher-quality one.
-
----
 
 ### Notes
 
 1. **Quality thresholds for database creation are stricter than regular dereplication.** The defaults are completeness ≥ 90% and contamination ≤ 5%. Adjust with `-c` and `-p` if needed.
 
-2. **Pre-computing ANI saves time on re-runs.** Generate the ANI file once with `skani triangle <bindir> -E -o ani_edges` and pass it via `--anifile` to skip re-computation. The file is also cached automatically as `<bindir>/subset_ani_edges` during the first run.
+2. **Pre-computing ANI saves time on re-runs.** Generate the ANI file once with `skani triangle <bindir> -E -o ani_edges` and pass it via `--anifile` to skip re-computation. If not provided, ANI is computed among unclassified bins and representatives of known species clusters selected in the first step from GTDB-Tk classification. The result file is cached automatically as `<bindir>/subset_ani_edges`, which can be reused in future runs.
 
-3. **The `--split` flag is needed when bins are not already separated by sample ID.** When running multi-sample binning on concatenated contigs (e.g., MetaBAT2 or COMEBin), use `--split` to let MAGmax separate bins by sample before processing.
+3. **The `--split` flag is needed when bins are not already separated by sample ID.** When running multi-sample binning on concatenated contigs (e.g., MetaBAT2 or COMEBin), use `--split` to let MAGmax separate bins by sample before processing. Isolate genomes will not be split by sample ID.
 
-4. **Isolate genome names must match bin filenames** (extension is stripped automatically; path prefixes are ignored). A warning is printed for any isolate genome that does not pass quality filtering.
+4. **Isolate genome names must match bin filenames.**
 
-5. **The `unclassified_clusterrepresentatives_gtdbtkspecies_ani_connections.tsv` file is a diagnostic resource.** It lists novel-cluster representatives whose ANI to a known GTDB-Tk species representative meets or exceeds that species' ANI radius, suggesting potential taxonomic placement at stricter thresholds.
+5. **The `unclassified_clusterrepresentatives_gtdbtkspecies_ani_connections.tsv` file is a diagnostic resource.** It lists novel-cluster representatives whose ANI to a known GTDB-Tk species representative meets or exceeds that species' ANI radius. This happens when unclassified cluster representatives have lower ANI to the GTDB reference species than the representatives selected from the user's input dataset.
