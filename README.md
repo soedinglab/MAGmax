@@ -178,7 +178,7 @@ To fix, use the below bash command
 
 2. If input bins are not separated by sample IDs (e.g., when using MetaBAT2 or COMEBin on concatenated contigs), use the `--split` option to let MAGmax automatically separate bins by sample ID.
    
-3. MAGmax can prioritize isolate genomes while selecting representative bin per cluster. User can provide list of isolate genome bins using `isolate-genomes` option.
+3. MAGmax can prioritize isolate genomes while selecting representative bin per cluster. For this, provide a list of isolate genome bins using `--isolate-genomes` option.
 
 4. We recommend Spades for reassembly which produces bins with higher purity than bins assembled using Megahit.
 
