@@ -19,3 +19,4 @@ test/mags_50comp_95purity
 *.tsv
 
 >>>>>>> repsel_bymaxedges
+.ipynb_checkpoints/
