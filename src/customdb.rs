@@ -157,6 +157,20 @@ pub fn run(args: &CustomDbArgs) -> io::Result<()> {
     let mut bindir =
         utility::validate_path(args.bindir.as_ref(), "bindir", &args.format).to_path_buf();
 
+    
+    if !args.gtdbtk.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("GTDB-Tk summary file {:?} does not exist", args.gtdbtk),
+        ));
+    }
+    if !args.gtdbtk.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("GTDB-Tk summary path {:?} is not a file", args.gtdbtk),
+        ));
+    }
+    
     if args.split {
         info!("  Split bins before processing: true");
 
