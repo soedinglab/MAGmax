@@ -143,8 +143,8 @@ Output is written to `specieslevel_customdb/` by default (use `-o` to override),
 
 | File | Description |
 |------|-------------|
+| `memberships.tsv` | All representatives and their cluster members (GTDB-Tk classified + unclassified). This is the final complete dereplication result. Tab-separated: representative, then a comma-separated member list |
 | `gtdbtk_species_representatives.tsv` | Representatives selected from GTDB-Tk-classified bins. Columns: `#gtdbtk_species_representative`, `species_name` |
-| `memberships.tsv` | All representatives and their cluster members (GTDB-Tk classified + unclassified). Tab-separated: representative, then a comma-separated member list |
 | `bins_checkm2_qualities.tsv` | Completeness and contamination of all final representatives. Columns: `#Bin`, `Completeness`, `Contamination` |
 | `unclassified_clusterrepresentatives_gtdbtkspecies_ani_connections.tsv` | ANI connections between representatives of novel-clusters and known species clusters that exceed the species ANI radius. Columns: `#unclassified_cluster_representative`, `gtdbtk_species_representative`, `ANI`, `species_ANI_radius`. It informs whether any unclassified representative might actually belong to a known species. |
 
