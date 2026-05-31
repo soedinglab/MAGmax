@@ -2,9 +2,6 @@
 
 Genome dereplication is not always perfect due to inherent limitations of hierarchical clustering algorithms used in dereplication tools (dRep and Galah). Alternatively, taxonomic classification using GTDBtk followed by grouping genomes by taxonomy assignment is another option for dereplication, but it has limitations too: 1) ANI radius of under-represented species may be inaccurate, causing wrong taxonomy labeling; 2) novel species cannot be assigned. Combining dereplication and taxonomic classification can enhance the discovery of novel species with improved accuracy.
 
----
-
-### Overview
 
 The `magmax customdb` subcommand builds a species-level non-redundant genome database by combining two complementary strategies:
 
@@ -209,7 +206,7 @@ Remaining bins are clustered by pairwise ANI (default 95%, aligned fraction ≥ 
 5. **The `unclassified_clusterrepresentatives_gtdbtkspecies_ani_connections.tsv` file is a diagnostic resource.** It lists novel-cluster representatives whose ANI to a known GTDB-Tk species representative meets or exceeds that species' ANI radius. This happens when unclassified cluster representatives have lower ANI to the GTDB reference species than the representatives selected from the user's input dataset.
 
 
-## Tutorial: Building a unified species-level database: integrating MAGmax dereplication results with GTDB reference genomes
+## Building a unified species-level database: integrating MAGmax dereplication results with GTDB reference genomes
 
 The `unifygtdb.sh` script combines magmax customdb output and GTDB reference genomes. This is useful when users wants to create a complete species-level genome reference database including all known species and unknown species covered in the input data.
 
