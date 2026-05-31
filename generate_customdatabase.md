@@ -209,7 +209,7 @@ Remaining bins are clustered by pairwise ANI (default 95%, aligned fraction ≥ 
 5. **The `unclassified_clusterrepresentatives_gtdbtkspecies_ani_connections.tsv` file is a diagnostic resource.** It lists novel-cluster representatives whose ANI to a known GTDB-Tk species representative meets or exceeds that species' ANI radius. This happens when unclassified cluster representatives have lower ANI to the GTDB reference species than the representatives selected from the user's input dataset.
 
 
-### Building a unified species-level database: integrating MAGmax dereplication results with GTDB reference genomes
+## Tutorial: Building a unified species-level database: integrating MAGmax dereplication results with GTDB reference genomes
 
 The `unifygtdb.sh` script combines magmax customdb output and GTDB reference genomes. This is useful when users wants to create a complete species-level genome reference database including all known species and unknown species covered in the input data.
 
