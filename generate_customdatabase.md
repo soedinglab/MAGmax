@@ -233,8 +233,8 @@ The script takes three inputs in this specific order:
     38222_27_bin.4	d__Bacteria;p__Bacillota;c__Bacilli;o__Lactobacillales;f__Streptococcaceae;g__Streptococcus;s__
 
 3. **Membership file** — the complete representative list from your `magmax customdb` output
+Example:`memberships.tsv`
    ```
-    Example:`memberships.tsv`
     #representative	member_genomes
     38222_26_bin.5	
     38222_27_bin.1	38510_111_bin.22,38510_42_bin.1,39907_150_bin.19,39923_2#63_bin.6,47680_139_bin.10,47681_116_bin.15
