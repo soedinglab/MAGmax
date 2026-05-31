@@ -207,3 +207,55 @@ Remaining bins are clustered by pairwise ANI (default 95%, aligned fraction ≥ 
 4. **Isolate genome names must match bin filenames.**
 
 5. **The `unclassified_clusterrepresentatives_gtdbtkspecies_ani_connections.tsv` file is a diagnostic resource.** It lists novel-cluster representatives whose ANI to a known GTDB-Tk species representative meets or exceeds that species' ANI radius. This happens when unclassified cluster representatives have lower ANI to the GTDB reference species than the representatives selected from the user's input dataset.
+
+
+### Building a unified species-level database: integrating MAGmax dereplication results with GTDB reference genomes
+
+The `unifygtdb.sh` script combines magmax customdb output and GTDB reference genomes. This is useful when users wants to create a complete species-level genome reference database including all known species and unknown species covered in the input data.
+
+
+    bash unifygtdb.sh gtdb_taxonomy.tsv gtdbtk_species_representatives.tsv memberships.tsv > unified.tsv
+
+The script takes three inputs in this specific order:
+1. **GTDB taxonomy file** — full GTDB genomes with their taxonomy assignments
+   
+    Example: `gtdb_taxonomy.tsv`
+    RS_GCF_000016525.1	d__Archaea;p__Methanobacteriota;c__Methanobacteria;o__Methanobacteriales;f__Methanobacteriaceae;g__Methanocatella;s__Methanocatella smithii
+    GB_GCA_002686525.1	d__Archaea;p__Thermoplasmatota;c__Poseidoniia;o__Poseidoniales;f__Thalassarchaeaceae;g__MGIIb-O2;s__MGIIb-O2 sp002686525
+    RS_GCF_000970205.1	d__Archaea;p__Halobacteriota;c__Methanosarcinia;o__Methanosarcinales;f__Methanosarcinaceae;g__Methanosarcina;s__Methanosarcina mazei
+
+2. **GTDB-Tk species representatives selected from the user data** — the representatives from `magmax customdb` run that were classified by GTDB-Tk
+   
+    Example: `gtdbtk_species_representatives.tsv`
+    #gtdbtk_species_representative	species_name
+    38222_26_bin.5	d__Bacteria;p__Bacillota;c__Bacilli;o__Staphylococcales;f__Staphylococcaceae;g__Staphylococcus;s__Staphylococcus haemolyticus
+    38222_27_bin.1	d__Archaea;p__Halobacteriota;c__Methanosarcinia;o__Methanosarcinales;f__Methanosarcinaceae;g__Methanosarcina;s__Methanosarcina mazei
+    38222_27_bin.4	d__Bacteria;p__Bacillota;c__Bacilli;o__Lactobacillales;f__Streptococcaceae;g__Streptococcus;s__
+
+3. **Membership file** — the complete representative list from your `magmax customdb` output
+   
+    Example:`memberships.tsv`
+    #representative	member_genomes
+    38222_26_bin.5	
+    38222_27_bin.1	38510_111_bin.22,38510_42_bin.1,39907_150_bin.19,39923_2#63_bin.6,47680_139_bin.10,47681_116_bin.15
+    38222_27_bin.4	38354_3_bin.7,38354_18_bin.10,38510_115_bin.7,38510_4_bin.3
+
+
+### Output
+
+A tab-separated file with two columns:
+- **Column 1**: MAGmax customdb representative genomes + GTDB representative genomes whose species are not covered in the user input data
+- **Column 2**: Matching GTDB reference genome for common species, or `unknown` if no match found
+
+Example: `unified.tsv`
+```
+#user_representative	gtdb_representative
+38222_26_bin.5	RS_GCF_006094395.1
+38222_27_bin.1	RS_GCF_000970205.1
+38222_27_bin.4	unknown
+RS_GCF_000016525.1  RS_GCF_000016525.1
+GB_GCA_002686525.1  GB_GCA_002686525.1
+...
+...
+remaining GTDB reference genomes
+```
