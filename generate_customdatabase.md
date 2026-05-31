@@ -220,17 +220,21 @@ The script takes three inputs in this specific order:
 1. **GTDB taxonomy file** — full GTDB genomes with their taxonomy assignments
    
     Example: `gtdb_taxonomy.tsv`
+    ```
     RS_GCF_000016525.1	d__Archaea;p__Methanobacteriota;c__Methanobacteria;o__Methanobacteriales;f__Methanobacteriaceae;g__Methanocatella;s__Methanocatella smithii
     GB_GCA_002686525.1	d__Archaea;p__Thermoplasmatota;c__Poseidoniia;o__Poseidoniales;f__Thalassarchaeaceae;g__MGIIb-O2;s__MGIIb-O2 sp002686525
     RS_GCF_000970205.1	d__Archaea;p__Halobacteriota;c__Methanosarcinia;o__Methanosarcinales;f__Methanosarcinaceae;g__Methanosarcina;s__Methanosarcina mazei
+    ```
 
 2. **GTDB-Tk species representatives selected from the user data** — the representatives from `magmax customdb` run that were classified by GTDB-Tk
    
     Example: `gtdbtk_species_representatives.tsv`
+    ```
     #gtdbtk_species_representative	species_name
     38222_26_bin.5	d__Bacteria;p__Bacillota;c__Bacilli;o__Staphylococcales;f__Staphylococcaceae;g__Staphylococcus;s__Staphylococcus haemolyticus
     38222_27_bin.1	d__Archaea;p__Halobacteriota;c__Methanosarcinia;o__Methanosarcinales;f__Methanosarcinaceae;g__Methanosarcina;s__Methanosarcina mazei
     38222_27_bin.4	d__Bacteria;p__Bacillota;c__Bacilli;o__Lactobacillales;f__Streptococcaceae;g__Streptococcus;s__
+    ```
 
 3. **Membership file** — the complete representative list from your `magmax customdb` output
    
