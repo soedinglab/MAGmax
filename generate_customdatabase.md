@@ -243,6 +243,8 @@ The script takes three inputs in this specific order:
     38222_27_bin.4	38354_3_bin.7,38354_18_bin.10,38510_115_bin.7,38510_4_bin.3
     ```
 
+⚠️ **Make sure that the same GTDB release was used for GTDBTk taxonomy classfication of your data and the GTDB taxonomy table supplied to the `unifygtdb.sh` script.**
+
 ### Output
 
 A tab-separated file with two columns:

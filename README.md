@@ -42,9 +42,10 @@ Benchmarking results comparing the default --no-reassembly and --sensitive modes
 ## Generate a custom species-level database
 MAGmax provides a `customdb` subcommand to build a species-level non-redundant genome database by combining GTDB-Tk taxonomic classification with ANI-based dereplication. Bins confidently assigned to a known GTDB-Tk species are grouped by species and one representative is selected per species. Remaining unclassified bins are dereplicated by ANI clustering, enabling discovery of novel species. Isolate genomes can be prioritized as representatives using `--isolate-genomes`.
 
-For a step-by-step guide, see the [tutorial](https://github.com/soedinglab/MAGmax/blob/main/generate_customdatabase.md).
-
     magmax customdb -g gtdbtk.summary.tsv -b <binsdir> -q quality_report.tsv -t 24
+
+> [!NOTE]
+> For a step-by-step guide, see the [tutorial](https://github.com/soedinglab/MAGmax/blob/main/generate_customdatabase.md).
 
 ## Installation
 ### Prerequisites
