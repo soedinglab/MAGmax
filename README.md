@@ -39,7 +39,7 @@ Sensitive mode selects representative genomes based on high-ANI connectivity tha
 
 Benchmarking results comparing the default --no-reassembly and --sensitive modes are available in [sensitive_mode.md](https://github.com/soedinglab/MAGmax/blob/main/sensitive.md).
 
-## Generate a custom species-level database
+## Generate a custom species-level reference database
 MAGmax provides a `customdb` subcommand to build a species-level non-redundant genome database by combining GTDB-Tk taxonomic classification with ANI-based dereplication. Bins confidently assigned to a known GTDB-Tk species are grouped by species and one representative is selected per species. Remaining unclassified bins are dereplicated by ANI clustering, enabling discovery of novel species. Isolate genomes can be prioritized as representatives using `--isolate-genomes`.
 
     magmax customdb -g gtdbtk.summary.tsv -b <binsdir> -q quality_report.tsv -t 24
