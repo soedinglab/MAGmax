@@ -45,7 +45,7 @@ MAGmax provides a `customdb` subcommand to build a species-level non-redundant g
     magmax customdb -g gtdbtk.summary.tsv -b <binsdir> -q quality_report.tsv -t 24
 
 
-For a step-by-step guide, see the [generate_customdatabase.md](https://github.com/soedinglab/MAGmax/blob/main/generate_customdatabase.md).
+For a step-by-step guide, see the tutorial in [generate_customdatabase.md](https://github.com/soedinglab/MAGmax/blob/main/generate_customdatabase.md).
 
 ## Installation
 ### Prerequisites
