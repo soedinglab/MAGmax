@@ -3,7 +3,7 @@ use std::io::{BufWriter, Write};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::fs::{remove_file, File};
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Read};
 use petgraph::graph::{Graph};
 use petgraph::graph::NodeIndex;
 use petgraph::visit::Dfs;
@@ -535,20 +535,39 @@ pub fn get_ani (
     }
 
     let output_file = File::create(ani_output)?;
-    let status = Command::new("skani")
+    let mut child = Command::new("skani")
         .arg("triangle")
         .args(&inputbins)
         .arg("-E")
         .arg("-t")
         .arg(threads.to_string())
         .stdout(Stdio::from(output_file))
-        .stderr(Stdio::null())
-        .status()?;
-    
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    let mut stderr_output = String::new();
+    if let Some(mut stderr) = child.stderr.take() {
+        stderr.read_to_string(&mut stderr_output)?;
+    }
+
+    let status = child.wait()?;
+    let stderr_output = stderr_output.trim();
+
+    if !stderr_output.is_empty() {
+        warn!("skani triangle reported:\n{}", stderr_output);
+    }
+
     if !status.success() {
+        let err_log_path = PathBuf::from(format!("{}.skani.err.log", ani_output.display()));
+        if let Err(write_err) = std::fs::write(&err_log_path, stderr_output) {
+            warn!("Failed to write skani error log to {:?}: {}", err_log_path, write_err);
+        } else {
+            error!("skani triangle failed; full stderr saved to {:?}", err_log_path);
+        }
+
         return Err(io::Error::new(
             io::ErrorKind::Other,
-            "skani triangle failed",
+            format!("skani triangle failed: {}", stderr_output),
         ));
     }
 
